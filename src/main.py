@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import copy
 from collections import defaultdict
-#from tdqm import tdqm
+from tqdm import tqdm
 
 from replay_buffer import ReplayBuffer
 from model import DGN, DQNR, DQN, MLP, NetMon
@@ -158,20 +158,18 @@ state_len = model.get_state_len() if model_has_state else 0
 
 # Init buffer
 seed = 1
-capacity = 2e5
+capacity = 200 # this is too much for my pc 200000
 replay_half_precision = True 
 buff = ReplayBuffer(seed, capacity, n_agents, agent_obs_size, state_len, n_nodes, 
                     node_obs_size, node_state_size, node_aux_size, half_precision=replay_half_precision)
 
-print("Succesfull")
-raise Exception("Terminating the program.")
-
 # Temp log variables
-log_buffer_size = 1000
+log_buffer_size = 100   # 1000
 log_reward = Buffer(log_buffer_size, (n_planes,), np.float32) # Init of buffer
-buffer_plot_last_n = 5000
+buffer_plot_last_n = 50   # 5000
 
 log_info = defaultdict(lambda: Buffer(log_buffer_size, (1,), np.float32))
+
 
 #  Just some summary comments
 #...
@@ -203,10 +201,10 @@ try:
     episode_done = False
     training_iteration = 0
 
-    total_steps = 1e6 # TODO: Where is it defined in the original implementation??
+    total_steps = 10 # 1e6
 
     # tdqm is used just so everything looks nice
-    for step in tdqm(range(1, int(total_steps)+ 1), miniters= 100, dynamic_ncols = True, disable=False): # Disable disables progress bar
+    for step in tqdm(range(1, int(total_steps)+ 1), miniters= 100, dynamic_ncols = True, disable=False): # Disable disables progress bar
         
         model.eval()    # Set the model into evaluation state 
 
@@ -225,13 +223,14 @@ try:
         # Set current state
         if model_has_state:
             model.state = last_state
-        
+
         # Using netmon
         buffer_node_state = (env.last_netmon_state.cpu().detach().numpy() if env.last_netmon_state is not None else 0)  # Move to the cpu, .detach() - removes the tensor from the computational graph, conversion to numpy array
-
+        
         netmon_info = env.get_netmon_info()
         if hasattr(env, "get_node_aux"):
             buffer_node_aux = env.get_node_aux()
+
 
         # Get actions and execute step in environment (This changes model states)
         joint_actions = policy(obs, adj)
@@ -401,7 +400,6 @@ try:
 
 
             q_values = model(batch.obs, batch.adj)
-
             # Run target module
             with torch.no_grad():
                 if model_has_state:
@@ -434,6 +432,7 @@ try:
 
             # Update of q-value loss
             loss_q = loss_q + torch.mean(td_error.pow(2)) / sequence_length
+
 
             # The following code is for attention. We have it, but i am going to leave it within the if hassattr statement
             if hasattr(model, 'att_weights') and att_regularization_coeff > 0:
@@ -508,7 +507,8 @@ try:
         #         get_state_dict(model, netmon, args.__dict__),
         #         Path(writer.get_logdir()) / f"model_{int(step):_d}.pt",
     
-        
+        # print("Succesfull")
+        # raise Exception("Terminating the program.")    
 
 
 except Exception as e:
