@@ -273,7 +273,7 @@ class NetMon(nn.Module):
         - updating node states with RNN
         - produces embeddings or features for nodes or agents in the graph
     """
-    def __init__(self, in_features, hidden_features: int, encoder_units, iterations, activation_fn, rnn_type="lst,",
+    def __init__(self, in_features, hidden_features: int, encoder_units, iterations, activation_fn, rnn_type="lstm",
                 rnn_carryover=True, agg_type="sum", output_neighbor_hidden = False, output_global_hidden = False
     ) -> None:
         super().__init__()
@@ -426,7 +426,7 @@ class NetMon(nn.Module):
             # Aggregate neighbors
             if self.output_neighbor_hidden:
                 extended_h.append(
-                        self._get_neighbor_h(last_neighbor_h, mask, max_degree)
+                        self.get_neighbor_h(last_neighbor_h, mask, max_degree)
                     )
 
             # Aggregate global
@@ -441,6 +441,9 @@ class NetMon(nn.Module):
         
         return NetMon.output_to_network_obs(h, node_agent_matrix)
 
+
+    def get_state_size(self):
+        return self.state_size
 
     def get_global_h(self, h):
         """
@@ -465,7 +468,7 @@ class NetMon(nn.Module):
 
         # Get max node id for dense observation tensor (excludes self)
         if max_degree is None:  # The maximum number of neigbors for each node -> if it is none -> compute from adjacency matrix
-            max_degree = torch.sum(mask, dim=1).max().long().time() - 1
+            max_degree = torch.sum(mask, dim=1).max().long().item() - 1
         
         # Pre-allocate a placeholder for each neighbor
         h_neighbors = torch.zeros((batch_size, n_nodes, max_degree, neighbor_h.shape[-1]), device = neighbor_h.device)
@@ -501,20 +504,21 @@ class NetMon(nn.Module):
 
         :mask: it is the adjacency matrix of the graph 
         """
-        batch_size, n_nodes, feature_dim = x.shape
+        batch_size, n_nodes, feature_dim = x.shape # (1, 131, 1463)
+        
         x = x.reshape(batch_size * n_nodes, -1)  # New shape is (batch_size * n_nodes, feature_dim)
+        # x is of shape (131,1463)
 
         if self.state == None: # For storing hidden states
             # Init
-            self.state = torch.zeros((batch_size, n_nodes, feature_dim), device = x.device)
-
+            self.state = torch.zeros((batch_size, n_nodes, self.state_size), device = x.device) 
+        
         # Reshape the state before further processing
-        self.state_reshape_in(batch_size, n_nodes)  # TODO: Unsure as to why n_nodes is passed within 
-        
-        
+        self.state_reshape_in(batch_size, n_nodes)  
+
+
         # step (1): encode observation to get h^0_v and combine with state
         h = self.encode(x)  # Producing initial hidden representations
-
 
         # Choose what we are using. Either LSTM or GRU
         if self.rnn_type in ["lstm", "lnlstm"]:
@@ -540,8 +544,7 @@ class NetMon(nn.Module):
 
         # Iteration
         for it in range(self.iterations):
-            if self.output_neighbor_hidden and it == self.iterations:
-
+            if self.output_neighbor_hidden and it == self.iterations-1:
                 # Won't comment on this now
                 if self.aggregation_def_type == 2:
                     # we know that the aggregation step will exchange the hidden states
@@ -621,7 +624,7 @@ class NetMon(nn.Module):
             # store last node state for debugging and aux loss
             self.state = h.unsqueeze(0)
 
-        self._state_reshape_out(batch_size, n_nodes)
+        self.state_reshape_out(batch_size, n_nodes)
 
         return h, last_neighbor_h
 
@@ -637,8 +640,8 @@ class NetMon(nn.Module):
 
         if self.state.numel() == 0:
             return
-        
-        self.state = self.state.respahe(batch_size * n_agents, self.num_states, -1).transpose(0,1) # num_states will be later defined within __init__
+
+        self.state = self.state.reshape(batch_size * n_agents, self.num_states, -1).transpose(0,1) # num_states will be later defined within __init__
 
     def state_reshape_out(self, batch_size, n_agents):
         """

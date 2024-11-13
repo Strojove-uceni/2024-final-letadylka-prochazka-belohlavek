@@ -25,7 +25,7 @@ class NetMonWrapper:
         self.frozen = False #   Freeze training 
 
     def __getattr__(self, name):
-        # allow to access attributes of the environment
+        # Allow to access attributes of the environment
         return getattr(self.env, name)  # If not found in the Netmon, look into the environment
 
     def __str__(self) -> str:
@@ -35,11 +35,11 @@ class NetMonWrapper:
             + "▲ environment is wrapped with NetMon (graph obs)"
         )
 
-    def reset(self):    # Resets the environment
+    def reset(self):    
         self.frozen = False
         self.current_netmon_state = None
         self.last_netmon_state = None
-        obs, adj = self.env.reset()
+        obs, adj = self.env.reset()     # Call reset on the environment -> on Routing
         for _ in range(self.startup_iterations):    # "Warm up" the environment
             network_obs = self._netmon_step()       # Perform a step in the environment
         return np.concatenate((obs, network_obs), axis=-1), adj
@@ -73,19 +73,19 @@ class NetMonWrapper:
             self.node_agent_matrix = self.env.get_node_agent_matrix()
             node_agent_matrix_in = torch.tensor(
                 self.node_agent_matrix, dtype=torch.float32
-            ).unsqueeze(0) # add a dimension to the first position
+            ).unsqueeze(0) # Add a dimension to the first position
 
             network_obs = torch.bmm(    # Perform Batch Matrix Multiplication
                 self.netmon_out.transpose(1, 2).cpu().detach(), node_agent_matrix_in
             ).transpose(1, 2)
             return network_obs.squeeze(0).numpy()
 
-        self.node_obs = self.env.get_node_observation() # Gather observations
-        self.node_adj = self.env.get_nodes_adjacency()  # Gather adjacency matrix
+        self.node_obs = self.env.get_node_observation()     # Gather observations
+        self.node_adj = self.env.get_nodes_adjacency()      # Gather adjacency matrix
         self.node_agent_matrix = self.env.get_node_agent_matrix()   # Gather agent positions
 
         with torch.no_grad():
-            # prepare inputs
+            # Prepare inputs
             node_obs_in = (
                 torch.tensor(self.node_obs, dtype=torch.float32)
                 .unsqueeze(0)
@@ -102,8 +102,8 @@ class NetMonWrapper:
                 .to(self.device, non_blocking=True)
             )
 
-            # perform netmon step with correct state
-            self.last_netmon_state = self.current_netmon_state  # Get state
+            # Perform netmon step with correct state
+            self.last_netmon_state = self.current_netmon_state      # Get state
             self.netmon.state = self.current_netmon_state
             self.netmon_out = self.netmon(
                 node_obs_in, node_adj_in, node_agent_matrix_in, no_agent_mapping=True
