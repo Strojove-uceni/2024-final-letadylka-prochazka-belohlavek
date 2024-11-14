@@ -416,6 +416,9 @@ class NetMon(nn.Module):
 
     def forward(self, x, mask, node_agent_matrix, max_degree=None, no_agent_mapping = False):
 
+        # print("Shape of x is: ", x.shape)
+        # print("Shape of mask is: ", mask.shape)
+        
         # This function contains steps (1), (2) and (3)
         h, last_neighbor_h = self.update_node_states(x, mask)
 
@@ -640,6 +643,8 @@ class NetMon(nn.Module):
 
         if self.state.numel() == 0:
             return
+        
+        print(self.state.shape)
 
         self.state = self.state.reshape(batch_size * n_agents, self.num_states, -1).transpose(0,1) # num_states will be later defined within __init__
 

@@ -184,339 +184,344 @@ exception_training = None
 exception_evaluation = None
 
 
-try:
+# try:
     # Some summary here
     #...
 
-    # Variables for the transition buffer
-    netmon_info = next_netmon_info = (0,0,0)
-    buffer_state = buffer_node_state = 0
-    buffer_node_aux = 0
-    # Maybe render environment here
-    # env.render()
-
-    episode_step = 0
-    episode_steps = 300
-    current_episode = 0
-    episode_done = False
-    training_iteration = 0
-
-    total_steps = 10 # 1e6
-
-    # tdqm is used just so everything looks nice
-    for step in tqdm(range(1, int(total_steps)+ 1), miniters= 100, dynamic_ncols = True, disable=False): # Disable disables progress bar
-        
-        model.eval()    # Set the model into evaluation state 
-
-        netmon.eval()   # Set the model into evaluation state
-
-        if episode_step is None or episode_done:
-            # Reset episode values
-            episode_step = 0
-            
-            obs, adj = env.reset()  # Basically inits the environment
-            current_episode += 1
-
-            # Reset states
-            last_state = None
-
-        # Set current state
-        if model_has_state:
-            model.state = last_state
-
-        # Using netmon
-        buffer_node_state = (env.last_netmon_state.cpu().detach().numpy() if env.last_netmon_state is not None else 0)  # Move to the cpu, .detach() - removes the tensor from the computational graph, conversion to numpy array
-        
-        netmon_info = env.get_netmon_info()
-        if hasattr(env, "get_node_aux"):
-            buffer_node_aux = env.get_node_aux()
-
-
-        # Get actions and execute step in environment (This changes model states)
-        joint_actions = policy(obs, adj)
-
-        next_obs, next_adj, reward, done, info = env.step(joint_actions)    # Perform step within the environment
-
-        # Remember state for the buffer, update state afterwards
-        if model_has_state:
-            buffer_state = last_state.cpu().numpy() if last_state is not None else 0
-            done_mask = ~torch.tensor(done, dtype=torch.bool, device=device).view(1,-1,1)
-            last_state = model.state * done_mask
-
-        # Use netmon
-        if netmon is not None:
-            next_netmon_info = env.get_netmon_info()
-        
-        episode_step += 1
-        episode_done = episode_step >= episode_steps
-
-        # Add info to the replay buffer
-        buff.add(obs, joint_actions, reward, next_obs, adj, next_adj, done, episode_done, buffer_state, 
-                 buffer_node_state, buffer_node_aux, *netmon_info, *next_netmon_info)
-
-        # 'Move' observations and adjacency
-        obs = next_obs
-        adj = next_adj
-
-        ## Training stats
-
-        """
-            Won't go into this right now
-        """
-        # # log number of steps for all agents after each episode
-        # log_reward.insert(reward.mean())
-        # # get all delays
-        # if episode_done:
-        #     info = env.get_final_info(info)
-        # for k, v in info.items():
-        #     log_info[k].insert(v)
-
-        # mean_output = {}
-
-        # if step % log_buffer_size == 0:
-        #     base_path = Path(writer.get_logdir())
-        #     if args.debug_plots:
-        #         if netmon is not None:
-        #             buff.save_node_state_diff_plot(
-        #                 base_path / f"z_img_node_diff_{step}.png",
-        #                 buffer_plot_last_n,
-        #             )
-        #             buff.save_node_state_std_plot(
-        #                 base_path / f"z_img_node_std_{step}.png", buffer_plot_last_n
-        #             )
-        #         if (netmon is not None and isinstance(env.env, Routing)) or isinstance(
-        #             env, Routing
-        #         ):
-        #             if env.record_distance_map:
-        #                 env.save_distance_map_plot(
-        #                     base_path / f"z_img_spawn_distance_{step}.png"
-        #                 )
-        #                 env.distance_map.clear()
-        #             if env.random_topology or step == log_buffer_size:
-        #                 import networkx as nx
-        #                 import matplotlib.pyplot as plt
-
-        #                 nx.draw_networkx(
-        #                     env.G,
-        #                     pos=nx.get_node_attributes(env.G, "pos"),
-        #                     with_labels=True,
-        #                     node_color="pink",
-        #                 )
-        #                 plt.savefig(base_path / f"z_img_topology_{step}.png")
-        #                 plt.clf()
-
-        #     mean_reward = log_reward.mean()
-        #     log_reward.clear()
-        #     for k, v in log_info.items():
-        #         if log_info[k]._count > 0:
-        #             mean_output[k] = v.mean()
-        #             v.clear()
-
-        #     eps_str = (
-        #         f"  eps: {policy._epsilon:.2f}" if hasattr(policy, "_epsilon") else ""
-        #     )
-        #     tqdm.write(
-        #         f"Episode: {current_episode}"  # print current episode
-        #         f"  step: {step/1000:.0f}k"
-        #         f"  reward: {mean_reward:.2f}"
-        #         f"{''.join(f'  {k}: {v:.2f}' for k, v in mean_output.items())}"
-        #         f"{eps_str}"
-        #         f"{' | BEST' if mean_reward > best_mean_reward else ''}"
-        #     )
-
-        #     if writer is not None:
-        #         writer.add_scalar("Iteration", training_iteration, step)
-        #         writer.add_scalar("Train/Reward", mean_reward, step)
-        #         for k, v in mean_output.items():
-        #             writer.add_scalar("Train/" + k.capitalize(), v, step)
-        #         if hasattr(policy, "_epsilon"):
-        #             writer.add_scalar("Train/Epsilon", policy._epsilon, step)
-        #         writer.add_scalar("Train/Episode", current_episode, step)
-        #         writer.flush()
-
-        #         if mean_reward > best_mean_reward:
-        #             torch.save(
-        #                 get_state_dict(model, netmon, args.__dict__),
-        #                 Path(writer.get_logdir()) / "model_best.pt",
-        #             )
-        #             best_mean_reward = mean_reward
-
-        # if (    # These are really not defined anywhere
-        #     step < step_before_train or buff.count < mini_batch_size
-        #     or step % step_between_train != 0
-        # ):
-        #     continue
-
-        # Now to the actual training part
-
-        training_iteration += 1
-
-        loss_q = torch.zeros(1, device=device)
-        loss_aux = torch.zeros(1, device=device)
-        loss_att = torch.zeros(1, device=device)
-
-        model.train()   # Set the model into the training mode
-        netmon.train()
-
-        # Some params, should be somewhere else
-        mini_batch_size = 1
-        sequence_length = 1
-        gamma = 0.98
-        att_regularization_coeff = 0.03
-
-        for t, batch in enumerate(buff.get_batch(mini_batch_size, device=device, sequence_length=sequence_length)):
-            if model_has_state and t == 0:
-                # Load the state from the begining
-                model.state = batch.agent_state
-
-
-            if t == 0:
-                # Get state from batch
-                netmon.state = batch.node_state
-            else:
-                # Reset netmon state if env episode was done in this step
-                netmon.state = last_netmon_state * (~last_batch_episode_done).view(-1,1,1)
-
-            # Run netmon step
-            network_obs = netmon(batch.next_obs, batch.node_adj, batch.node_agent_matrix)
-
-            # Netmon aux loss, just a calculation
-            if aux_model is not None:
-                aux_prediction = aux_model(netmon.state)
-                loss_aux = (loss_aux + torch.mean((aux_prediction - batch.node_aux) **2)/sequence_length)
-
-            # Replace observation in place
-            net_obs_dim = network_obs.shape[-1]     # Take last 
-            batch.obs[:, :, -net_obs_dim:] = network_obs
-
-            # Some code for t > 0:
-            # ...model_checkpoint_steps
-            # Let's now remember the correct netmon state for gradient calculation
-            last_netmon_state = netmon.state
-
-            # Done episodes, this is here, otherwise masking would be incorrect
-            last_batch_episode_done = batch.episode_done
-            last_batch_idx = batch.idx
-
-
-            q_values = model(batch.obs, batch.adj)
-            # Run target module
-            with torch.no_grad():
-                if model_has_state:
-                    # This is here to avoid storing state and enxt state of the current model
-                    model_tar.state = model.state.detach()
-
-                # Get network observation with netmon
-                next_network_obs = netmon(batch.next_node_obs, batch.next_node_adj, batch.next_node_agent_matrix)
-                next_net_obs_dim = next_network_obs.shape[-1]#model_checkpoint_steps
-                next_q = model_tar(batch.next_obs, batch.next_adj)
-                next_q_max = next_q.max(dim=2)[0]
-
-
-            if model_has_state:
-                # If the next step belongs to a new episode we mask agent state
-                state_mask = ~batch.done * (~batch.episode_done).view(-1,1)
-                model.state = model.state * state_mask.unsqueeze(-1)
-
-
-            # DQN target with 1 step bootstrapping
-            chosen_action_target_q = (batch.reward + (~batch.done) * gamma * next_q_max)
-
-
-            # Original DGN loss on all actions - even unused ones. This can be adjusted so that it is DQN loss just on selected actions
-            q_target = q_values.detach()
-            q_target = torch.scatter(q_target, -1, batch.action.unsqueeze(-1), chosen_action_target_q.unsqueeze(-1))
-
-            # Combined value loss for each sample in the batch
-            td_error = q_values - q_target
-
-            # Update of q-value loss
-            loss_q = loss_q + torch.mean(td_error.pow(2)) / sequence_length
-
-
-            # The following code is for attention. We have it, but i am going to leave it within the if hassattr statement
-            if hasattr(model, 'att_weights') and att_regularization_coeff > 0:
-
-                # First KL_div argument is given in log-probability
-                attention = F.log_softmax(torch.stack(model.att_weights), dim = -1) # Note: .stack just concatenates a sequence of tensors along a new dimension
-
-                # Target model contains the attention weights for the next step
-                target_attention = F.softmax(torch.stack(model_tar.att_weights), dim=-1)
-
-                # Remember the original shape
-                old_att_shape = attention.shape
-
-                # Now we need to join first dimensions to apply KL divergence
-                attention = attention.view(-1, n_agents)
-
-
-                # Now calculate pointwise KL divergence
-                kl_div = F.kl_div(attention, target_attention, reduction="none")
-
-                # We then bring the tensor back to the old shape 
-                #       (num_layers, batch_size, heads, n_agents_source, n_agents_dest)
-                kl_div = kl_div.view(old_att_shape)
-
-                # Then we transpose and reduce last three dimensions with sum
-                """
-                    - first transpose results in (n_agents_source, batch_size, heads, num_layers, n_agents_dest)
-                    - second one results in (batch_size, n_agents_source, heads, num_layers, n_agents_dest)
-                    - then we reduce with sum to (batch_size, n_agents_source, ...)
-
-                """
-                kl_div = kl_div.transpose(0, -2).transpose(0,1).sum(dim=(-1,-2,-3))
-
-                # Now we mask out done agents (their next step in already in a new episode)
-                # Reduction loss like 'batchmean', we clamp the number of not done agents with min 1 -> avoid division by zero
-                kl_div = (kl_div * (~batch.done)).sum() /torch.clamp((~batch.done).sum(), min =1)
-
-                loss_att = loss_att + kl_div / sequence_length
-
-        loss = (loss_q + att_regularization_coeff * loss_att + aux_loss_coeff * loss_aux)
-        optimizer.zero_grad()
-        loss.backward()
-
-        # Clip gradients to faciliate learning
-        torch.nn.utils.clip_grad_value_(parameters, 0.5)
-        torch.nn.utils.clip_grad_norm_(parameters, 1.0)
-
-        if aux_model is not None:
-            log_info["loss_aux"].insert(loss_aux.detach().mean().item())
-
-        log_info["q_values"].insert(q_values.detach().mean().item())
-        log_info["q_target"].insert(q_target.detach().mean().item())
-
-        log_info["loss"].insert(loss.item())
-        # only log q and attention loss if necessary
-        if hasattr(model, "att_weights") and args.att_regularization_coeff > 0:
-            log_info["loss_q"].insert(loss_q.item())
-            log_info["loss_att"].insert(loss_att.item())
-
-        if args.target_update_steps <= 0:
-            # smooth target update as in DGN
-            interpolate_model(model, model_tar, args.tau, model_tar)
-
-        elif training_iteration % args.target_update_steps == 0:
-            # regular target update
-            model_tar.load_state_dict(model.state_dict())
-            tqdm.write(f"Update network, train iteration {training_iteration}")
-
-        # save checkpoints
-        # if step % args.model_checkpoint_steps == 0 and writer is not None:
-        #     torch.save(
-        #         get_state_dict(model, netmon, args.__dict__),
-        #         Path(writer.get_logdir()) / f"model_{int(step):_d}.pt",
+# Variables for the transition buffer
+netmon_info = next_netmon_info = (0,0,0)
+buffer_state = buffer_node_state = 0
+buffer_node_aux = 0
+# Maybe render environment here
+# env.render()
+
+episode_step = None
+episode_steps = 300
+current_episode = 0
+episode_done = False
+training_iteration = 0
+
+total_steps = 100 # 1e6
+
+
+# tdqm is used just so everything looks nice
+for step in tqdm(range(1, int(total_steps)+ 1), miniters= 100, dynamic_ncols = True, disable=False): # Disable disables progress bar
     
+    model.eval()    # Set the model into evaluation state 
+
+    netmon.eval()   # Set the model into evaluation state
+
+    if episode_step is None or episode_done:
+        # Reset episode values
+        episode_step = 0
+        
+        obs, adj = env.reset()  # Basically inits the environment
+        current_episode += 1
+
+        # Reset states
+        last_state = None
+
+    # Set current state
+    if model_has_state:
+        model.state = last_state
+
+    # Using netmon
+    buffer_node_state = (env.last_netmon_state.cpu().detach().numpy() if env.last_netmon_state is not None else 0)  # Move to the cpu, .detach() - removes the tensor from the computational graph, conversion to numpy array
+    
+    netmon_info = env.get_netmon_info()
+    if hasattr(env, "get_node_aux"):
+        buffer_node_aux = env.get_node_aux()
+
+    # Get actions and execute step in environment (This changes model states)
+    joint_actions = policy(obs, adj)
+
+    next_obs, next_adj, reward, done, info = env.step(joint_actions)    # Perform step within the environment
+
+    # Remember state for the buffer, update state afterwards
+    if model_has_state:
+        buffer_state = last_state.cpu().numpy() if last_state is not None else 0
+        done_mask = ~torch.tensor(done, dtype=torch.bool, device=device).view(1,-1,1)
+        last_state = model.state * done_mask
+
+    # Use netmon
+    if netmon is not None:
+        next_netmon_info = env.get_netmon_info()
+    
+    episode_step += 1
+    episode_done = episode_step >= episode_steps
+
+    # Add info to the replay buffer
+    buff.add(obs, joint_actions, reward, next_obs, adj, next_adj, done, episode_done, buffer_state, 
+                buffer_node_state, buffer_node_aux, *netmon_info, *next_netmon_info)
+
+    
+    # 'Move' observations and adjacency
+    obs = next_obs
+    adj = next_adj
+
+    ## Training stats
+
+    """
+        Won't go into this right now
+    """
+    # # log number of steps for all agents after each episode
+    # log_reward.insert(reward.mean())
+    # # get all delays
+    # if episode_done:
+    #     info = env.get_final_info(info)
+    # for k, v in info.items():
+    #     log_info[k].insert(v)
+
+    # mean_output = {}
+
+    # if step % log_buffer_size == 0:
+    #     base_path = Path(writer.get_logdir())
+    #     if args.debug_plots:
+    #         if netmon is not None:
+    #             buff.save_node_state_diff_plot(
+    #                 base_path / f"z_img_node_diff_{step}.png",
+    #                 buffer_plot_last_n,
+    #             )
+    #             buff.save_node_state_std_plot(
+    #                 base_path / f"z_img_node_std_{step}.png", buffer_plot_last_n
+    #             )
+    #         if (netmon is not None and isinstance(env.env, Routing)) or isinstance(
+    #             env, Routing
+    #         ):
+    #             if env.record_distance_map:
+    #                 env.save_distance_map_plot(
+    #                     base_path / f"z_img_spawn_distance_{step}.png"
+    #                 )
+    #                 env.distance_map.clear()
+    #             if env.random_topology or step == log_buffer_size:
+    #                 import networkx as nx
+    #                 import matplotlib.pyplot as plt
+
+    #                 nx.draw_networkx(
+    #                     env.G,
+    #                     pos=nx.get_node_attributes(env.G, "pos"),
+    #                     with_labels=True,
+    #                     node_color="pink",
+    #                 )
+    #                 plt.savefig(base_path / f"z_img_topology_{step}.png")
+    #                 plt.clf()
+
+    #     mean_reward = log_reward.mean()
+    #     log_reward.clear()
+    #     for k, v in log_info.items():
+    #         if log_info[k]._count > 0:
+    #             mean_output[k] = v.mean()
+    #             v.clear()
+
+    #     eps_str = (
+    #         f"  eps: {policy._epsilon:.2f}" if hasattr(policy, "_epsilon") else ""
+    #     )
+    #     tqdm.write(
+    #         f"Episode: {current_episode}"  # print current episode
+    #         f"  step: {step/1000:.0f}k"
+    #         f"  reward: {mean_reward:.2f}"
+    #         f"{''.join(f'  {k}: {v:.2f}' for k, v in mean_output.items())}"
+    #         f"{eps_str}"
+    #         f"{' | BEST' if mean_reward > best_mean_reward else ''}"
+    #     )
+
+    #     if writer is not None:
+    #         writer.add_scalar("Iteration", training_iteration, step)
+    #         writer.add_scalar("Train/Reward", mean_reward, step)
+    #         for k, v in mean_output.items():
+    #             writer.add_scalar("Train/" + k.capitalize(), v, step)
+    #         if hasattr(policy, "_epsilon"):
+    #             writer.add_scalar("Train/Epsilon", policy._epsilon, step)
+    #         writer.add_scalar("Train/Episode", current_episode, step)
+    #         writer.flush()
+
+    #         if mean_reward > best_mean_reward:
+    #             torch.save(
+    #                 get_state_dict(model, netmon, args.__dict__),
+    #                 Path(writer.get_logdir()) / "model_best.pt",
+    #             )
+    #             best_mean_reward = mean_reward
+
+    # if (    # These are really not defined anywhere
+    #     step < step_before_train or buff.count < mini_batch_size
+    #     or step % step_between_train != 0
+    # ):
+    #     continue
+
+    # Now to the actual training part
+
+    training_iteration += 1
+
+    loss_q = torch.zeros(1, device=device)
+    loss_aux = torch.zeros(1, device=device)
+    loss_att = torch.zeros(1, device=device)
+
+    model.train()   # Set the model into the training mode
+    netmon.train()
+
+    # Some params, should be somewhere else
+    mini_batch_size = 10 # Maybe should be 1
+    sequence_length = 1
+    gamma = 0.98
+    att_regularization_coeff = 0.03
+
+    for t, batch in enumerate(buff.get_batch(mini_batch_size, device=device, sequence_length=sequence_length)):
+        if model_has_state and t == 0:
+            # Load the state from the begining
+            model.state = batch.agent_state
+
+
+        if t == 0:
+            # Get state from batch
+            netmon.state = batch.node_state
+        else:
+            # Reset netmon state if env episode was done in this step
+            netmon.state = last_netmon_state * (~last_batch_episode_done).view(-1,1,1)
+
+        # Run netmon step
+        network_obs = netmon(batch.node_adj, batch.node_adj, batch.node_agent_matrix)
+
         # print("Succesfull")
-        # raise Exception("Terminating the program.")    
+        # raise Exception("Terminating the program.")   
+
+        # Netmon aux loss, just a calculation
+        if aux_model is not None:
+            aux_prediction = aux_model(netmon.state)
+            loss_aux = (loss_aux + torch.mean((aux_prediction - batch.node_aux) **2)/sequence_length)
+
+        # Replace observation in place
+        net_obs_dim = network_obs.shape[-1]     # Take last 
+        batch.obs[:, :, -net_obs_dim:] = network_obs
+
+        # Some code for t > 0:
+        # ...model_checkpoint_steps
+        # Let's now remember the correct netmon state for gradient calculation
+        last_netmon_state = netmon.state
+
+        # Done episodes, this is here, otherwise masking would be incorrect
+        last_batch_episode_done = batch.episode_done
+        last_batch_idx = batch.idx
+
+        q_values = model(batch.obs, batch.adj)
+        # Run target module
+        with torch.no_grad():
+            if model_has_state:
+                # This is here to avoid storing state and enxt state of the current model
+                model_tar.state = model.state.detach()
+
+            # Get network observation with netmon
+            next_network_obs = netmon(batch.next_node_obs, batch.next_node_adj, batch.next_node_agent_matrix)
+            next_net_obs_dim = next_network_obs.shape[-1]#model_checkpoint_steps
+            next_q = model_tar(batch.next_obs, batch.next_adj)
+            next_q_max = next_q.max(dim=2)[0]
 
 
-except Exception as e:
-    exception_training = e
+        if model_has_state:
+            # If the next step belongs to a new episode we mask agent state
+            state_mask = ~batch.done * (~batch.episode_done).view(-1,1)
+            model.state = model.state * state_mask.unsqueeze(-1)
 
-finally:
-    print("Clean exit")
-    del buff
+
+        # DQN target with 1 step bootstrapping
+        chosen_action_target_q = (batch.reward + (~batch.done) * gamma * next_q_max)
+
+
+        # Original DGN loss on all actions - even unused ones. This can be adjusted so that it is DQN loss just on selected actions
+        q_target = q_values.detach()
+        q_target = torch.scatter(q_target, -1, batch.action.unsqueeze(-1), chosen_action_target_q.unsqueeze(-1))
+
+        # Combined value loss for each sample in the batch
+        td_error = q_values - q_target
+
+        # Update of q-value loss
+        loss_q = loss_q + torch.mean(td_error.pow(2)) / sequence_length
+
+
+        # The following code is for attention. We have it, but i am going to leave it within the if hassattr statement
+        if hasattr(model, 'att_weights') and att_regularization_coeff > 0:
+
+            # First KL_div argument is given in log-probability
+            attention = F.log_softmax(torch.stack(model.att_weights), dim = -1) # Note: .stack just concatenates a sequence of tensors along a new dimension
+
+            # Target model contains the attention weights for the next step
+            target_attention = F.softmax(torch.stack(model_tar.att_weights), dim=-1)
+
+            # Remember the original shape
+            old_att_shape = attention.shape
+
+            # Now we need to join first dimensions to apply KL divergence
+            attention = attention.view(-1, n_agents)
+
+
+            # Now calculate pointwise KL divergence
+            kl_div = F.kl_div(attention, target_attention, reduction="none")
+
+            # We then bring the tensor back to the old shape 
+            #       (num_layers, batch_size, heads, n_agents_source, n_agents_dest)
+            kl_div = kl_div.view(old_att_shape)
+
+            # Then we transpose and reduce last three dimensions with sum
+            """
+                - first transpose results in (n_agents_source, batch_size, heads, num_layers, n_agents_dest)
+                - second one results in (batch_size, n_agents_source, heads, num_layers, n_agents_dest)
+                - then we reduce with sum to (batch_size, n_agents_source, ...)
+
+            """
+            kl_div = kl_div.transpose(0, -2).transpose(0,1).sum(dim=(-1,-2,-3))
+
+            # Now we mask out done agents (their next step in already in a new episode)
+            # Reduction loss like 'batchmean', we clamp the number of not done agents with min 1 -> avoid division by zero
+            kl_div = (kl_div * (~batch.done)).sum() /torch.clamp((~batch.done).sum(), min =1)
+
+            loss_att = loss_att + kl_div / sequence_length
+
+    loss = (loss_q + att_regularization_coeff * loss_att + aux_loss_coeff * loss_aux)
+    optimizer.zero_grad()
+    loss.backward()
+
+    # Clip gradients to faciliate learning
+    torch.nn.utils.clip_grad_value_(parameters, 0.5)
+    torch.nn.utils.clip_grad_norm_(parameters, 1.0)
+
+    if aux_model is not None:
+        log_info["loss_aux"].insert(loss_aux.detach().mean().item())
+
+    log_info["q_values"].insert(q_values.detach().mean().item())
+    log_info["q_target"].insert(q_target.detach().mean().item())
+
+    log_info["loss"].insert(loss.item())
+    # only log q and attention loss if necessary
+    if hasattr(model, "att_weights") and args.att_regularization_coeff > 0:
+        log_info["loss_q"].insert(loss_q.item())
+        log_info["loss_att"].insert(loss_att.item())
+
+    if args.target_update_steps <= 0:
+        # smooth target update as in DGN
+        interpolate_model(model, model_tar, args.tau, model_tar)
+
+    elif training_iteration % args.target_update_steps == 0:
+        # regular target update
+        model_tar.load_state_dict(model.state_dict())
+        tqdm.write(f"Update network, train iteration {training_iteration}")
+
+    
+    # save checkpoints
+    # if step % args.model_checkpoint_steps == 0 and writer is not None:
+    #     torch.save(
+    #         get_state_dict(model, netmon, args.__dict__),
+    #         Path(writer.get_logdir()) / f"model_{int(step):_d}.pt",
+
+    # print("Succesfull")
+    # raise Exception("Terminating the program.")    
+
+
+# except Exception as e:
+#     exception_training = e
+#     print(exception_training)
+
+# finally:
+    # print("Clean exit")
+del buff
 
 
 

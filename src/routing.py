@@ -73,7 +73,7 @@ class Routing(NetworkEnv):
 
         # Basics
         self.adj_mat = adj_mat
-        self.amount_of_neighbors = np.count_nonzero(adj_mat[1,:])
+        self.amount_of_neighbors = 10 # np.count_nonzero(adj_mat[1,:])
         self.dist_mat = dist_mat
 
         # k neighbors
@@ -171,6 +171,8 @@ class Routing(NetworkEnv):
         Renders the airspace
         """
         pass
+
+
 
     def get_node_observation(self):
         """
@@ -461,7 +463,7 @@ class Routing(NetworkEnv):
                     """
                     self.action_mask[i, 0] = 1    # The plane is no longer allowed to stay in place
                     for edge_i, e in enumerate(self.network.nodes[plane.now].edges):
-                         self.action_mask[i, 1 + edge_i] = self.network.edges[e].get_other_node(plane.now) in plane.visited_nodes   # If it is, place 1
+                         self.action_mask[i, edge_i] = self.network.edges[e].get_other_node(plane.now) in plane.visited_nodes   # If it is, place 1
 
 
 
