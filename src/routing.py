@@ -32,6 +32,7 @@ class Plane:
         self.shortest_path_weight = None
         self.visited_nodes = None
         self.speed = None       # Added
+        self.on_edge = None
 
     def reset(self, start, target, shortest_path_weight, speed):
         self.now = start
@@ -82,15 +83,11 @@ class Routing(NetworkEnv):
         # Log information
         self.agent_steps = np.zeros(self.n_planes)
 
-        # Commented for now
-         # whether to use random targets or target == 0 for all packets
-        # self.num_random_targets = self.network.n_nodes
-        # assert self.num_random_targets >= 0
 
         # Map shortest path to actual agents steps
         self.distance_map = defaultdict(list)
-        self.sum_packets_per_node = None
-        self.sum_packets_per_edge = None
+        self.sum_planes_per_node = None
+        self.sum_planes_per_edge = None
 
         self.enable_action_mask = enable_action_mask
         self.action_mask = np.zeros((n_planes, self.amount_of_neighbors), dtype=bool)
@@ -102,9 +99,9 @@ class Routing(NetworkEnv):
         """
         # The number of choices should be equal to the maximum number of neighbors a node can have
         # in our case it is quite simple as every node as a static number of neighbors, at least for now
-        self.action_space = Discrete(self.amount_of_neighbors-1, start=0) # {0,1,2} using gym action space
+        self.action_space = Discrete(self.amount_of_neighbors + 1, start=0) # {0,1,2, ..., 11} using gym action space
 
-        self.eval_info_enables = False
+        self.eval_info_enabled = False
 
 
     def set_eval_info(self, val):
@@ -127,19 +124,19 @@ class Routing(NetworkEnv):
         if plane.edge != -1:
             self.network.edges[plane.edge].load -= plane.size
 
-
-        # TODO: proper set up of start and target + generate speed from a list for the plane
         # Reset plane in place
-        speed = 100
-        start = np.random.randint(self.network.n_nodes)
-        target = np.random.randint(self.network.n_nodes)
+        speed = 670
+        range_values = np.arange(self.network.n_nodes- 17, self.network.n_nodes, dtype=int)
+        start, target = np.random.choice(range_values, size=2, replace=False)
+
+        # start = np.random.randint(self.network.n_nodes- 17, self.network.n_nodes)   # Random number betwen the last 17 
+        # target = np.random.randint(self.network.n_nodes - 17, self.network.n_nodes)
+
         # print("Reseting plane", plane.id)
-        # print("Weights:")
-        # for path in self.network.shortest_paths_weights:
-        #     for end in self.network.shortest_paths_weights[path]:
-        #         print(path, " --- ", end, " --- ", self.network.shortest_paths_weights[path][end])
 
+        
 
+        # Reset plane
         plane.reset(start=start, target=target, shortest_path_weight=self.network.shortest_paths_weights[start][target] , speed=speed)
         
     ## Skipping the __str__ function for now
@@ -156,6 +153,10 @@ class Routing(NetworkEnv):
         for edge in self.network.edges:
             # Adds new "load" attribude to edges 
             edge.load = 0       # Set the attribute to 0
+
+        if self.eval_info_enabled:
+            self.sum_planes_per_node = np.zeros(self.network.n_nodes)
+            self.sum_planes_per_edge = np.zeros(len(self.network.edges))
         
         # Generate planes
         self.planes = []
@@ -170,9 +171,7 @@ class Routing(NetworkEnv):
         """
         Renders the airspace
         """
-        pass
-
-
+        self.network.render(self.planes)
 
     def get_node_observation(self):
         """
@@ -215,7 +214,7 @@ class Routing(NetworkEnv):
                 observation.append(self.network.edges[k].load)      # Add the info into the observation
 
 
-            ### THIS IS NEW ### 
+            # Mask nodes with less than maximum neighbors 
             num_edges = len(self.network.nodes[j].edges)
             if num_edges != 10:
                 for h in range(10-num_edges):
@@ -245,7 +244,9 @@ class Routing(NetworkEnv):
                 aux_j.append(self.network.shortest_paths_weights[j][k])     # Append the shortest path from j to k
 
             aux.append(aux_j)
-
+        """
+        The output is of shape: (n_waypoints, n_waypoints) with the addition that diagonal is 0
+        """
         return np.array(aux, dtype=np.float32)
 
     def get_node_agent_matrix(self):
@@ -294,12 +295,10 @@ class Routing(NetworkEnv):
             observation += one_hot_list(other_node, self.network.n_nodes)   # Again, encode the position in a vector - if it is in a waypoint, it will create a 0 vector
 
             observation.append(self.planes[i].time)
-            observation.append(self.planes[i].size) #TODO: WE WOULD LIKE TO ADD SPEED HERE!!!
+            observation.append(self.planes[i].size) # TODO: WE WOULD LIKE TO ADD SPEED HERE!!!
             observation.append(self.planes[i].id)
 
             
-
-
             # Edge information
             for j in self.network.nodes[self.planes[i].now].edges:  # Go through all edges of i-th node
                 # print(len(self.network.nodes[self.planes[i].now].edges))
@@ -312,7 +311,7 @@ class Routing(NetworkEnv):
                 # Here is missing a big chunk of commmented code that involed appending the shortest path weights, authors had it commented
 
 
-            ### THIS IS NEW ### 
+            # Mask nodes with less than maximum neighbors
             num_edges = len(self.network.nodes[self.planes[i].now].edges)
             if num_edges != 10:
                 for i in range(10-num_edges):
@@ -321,7 +320,6 @@ class Routing(NetworkEnv):
                     observation.append(0)
 
 
-            #print(len(observation))
 
             # Other data
             count = 0
@@ -362,14 +360,16 @@ class Routing(NetworkEnv):
 
     def step(self, act):
         """
-        What is act?
+        What is act? 
+            - act is a vector of shape (n_planes)
+            - each number is the index of the edge they have chosen for traversal
         """
 
+        #print("Act is: ", act)
 
         reward = np.zeros(self.n_planes, dtype=np.float32)  # Define reward for each plane
         looped = np.zeros(self.n_planes, dtype=np.float32)
         done = np.zeros(self.n_planes, dtype=bool)          # Done planes
-        # ... excluding drop packet 
         success = np.zeros(self.n_planes, dtype=bool)       # Succesful planes
         blocked = 0 # ???
 
@@ -385,21 +385,30 @@ class Routing(NetworkEnv):
             # agent i controls plane i
             plane = self.planes[i]
 
-            # eval_info_enabled leaving out for now
-
-
+            # Eval info
+            if self.eval_info_enabled:
+                if plane.edge == -1:
+                    self.sum_planes_per_node[plane.now] += 1
+            
+        
             # Select outgoing edge 
-            if plane.edge == -1:    # If at a waypoint
-                t = self.network.nodes[plane.now].edges[act[i]-1]   # TODO: is this correct?    # I am really not sure what act is
+            if plane.edge == -1 and act[i] != 0:    # If at a waypoint
+
+                """
+                    - act[i] -1 is correct here
+                    - as act[i] will be from 1-10 but edges can be on index 0 within the list of edges of a node
+                """
+                t = self.network.nodes[plane.now].edges[act[i]-1]   # Select an outgoing edge based on policy
 
                 # Note that planes that are handled earlier in this loop are prioritized
                 if self.network.edges[t].load + plane.size > 1: # Not possible to take this edge
                     reward[i] -= 0.2
                     blocked += 1
+
                 else:
                     # Take this edge
                     plane.edge = t      # Begin traversal of this edge
-                    plane.time = self.network.edges[t].length       # TODO: adjust it based on the speed of the plane: plane.time = self.network.edges[t].length/ plane.speed
+                    plane.time = self.network.edges[t].length/plane.speed       # TODO: adjust it based on the speed of the plane: plane.time = self.network.edges[t].length/ plane.speed
                     # This should be set so that the time till the plane arrives is calculated - somehow should be set to 1,2,3,4 etc.
 
                     # Assign load to the selected edge
@@ -412,41 +421,45 @@ class Routing(NetworkEnv):
                     else:
                         plane.visited_nodes.add(plane.now)
         
-        #  if self.eval_info_enabled:
-        #     total_edge_load = 0
-        #     occupied_edges = 0
-        #     packets_on_edges = 0
-        #     total_packet_size = 0
-        #     packet_sizes = []
 
-        #     for edge in self.network.edges:
-        #         total_edge_load += edge.load
-        #         if edge.load > 0:
-        #             occupied_edges += 1
+        # INFO
+        if self.eval_info_enabled:
+            total_edge_load = 0
+            occupied_edges = 0
+            planes_on_edges = 0
+            total_plane_size = 0
+            plane_sizes = []
 
-        #     for i in range(self.n_data):
-        #         packet = self.data[i]
-        #         if packet.edge != -1:
-        #             self.sum_packets_per_edge[packet.edge] += 1
+            for edge in self.network.edges:
+                total_edge_load += edge.load
+                if edge.load > 0:
+                    occupied_edges += 1
 
-        #         total_packet_size += packet.size
-        #         packet_sizes.append(self.data[i].size)
-        #         if packet.edge != -1:
-        #             packets_on_edges += 1
+            for i in range(self.n_planes):
+                plane = self.planes[i]
+                if plane.edge != -1:
+                    self.sum_planes_per_edge[plane.edge] += 1
 
-        #     packet_distances = list(
-        #         map(
-        #             lambda p: self.network.shortest_paths_weights[p.now][p.target],
-        #             self.data,
-        #         )
-        #     )
+                total_plane_size += plane.size
+                plane_sizes.append(self.planes[i].size)
+                if plane.edge != -1:
+                    planes_on_edges += 1
+
+            plane_distances = list(
+                map(
+                    lambda p: self.network.shortest_paths_weights[p.now][p.target],
+                    self.planes,
+                )
+            )
+
+
 
         # Then simulate in-flight planes (=> effect of actions)
         for i in range(self.n_planes):
             plane = self.planes[i]
 
             if plane.edge != -1: # Plane on an edge
-                plane.time -=1
+                plane.time -= 1 # This number should be adjusted based on the calcuted time from actions
 
                 # Plane finished traversing the edge
                 if plane.time <= 0:
@@ -495,7 +508,7 @@ class Routing(NetworkEnv):
             # The plane has reached the target
             has_reached_target = plane.edge == -1 and plane.now == plane.target     # If not on an edge and at the target waypoint
             if has_reached_target:
-                reward[i] += 10 
+                reward[i] += 10.0
                 done[i] = True
                 success[i] = True
 
@@ -506,6 +519,9 @@ class Routing(NetworkEnv):
                 # Insert delays before resetting planes
                 delays_arrived.append(self.agent_steps[i])
                 spr.append(self.agent_steps[i]/opt_distance)
+                if self.eval_info_enabled:
+                    self.distance_map[opt_distance].append(self.agent_steps[i])
+
 
                 # Not sure about delays
                 delays.append(self.agent_steps[i])
@@ -535,6 +551,21 @@ class Routing(NetworkEnv):
             "blocked": blocked,
         }
 
+
+        if self.eval_info_enabled:
+            info.update(
+                {
+                    "total_edge_load": total_edge_load,
+                    "occupied_edges": occupied_edges,
+                    "planes_on_edges": planes_on_edges,
+                    "total_plane_size": total_plane_size,
+                    "plane_sizes": plane_sizes,
+                    "plane_distances": plane_distances,
+                }
+            )
+
+        #self.render()
+
         return observations, adj, reward, done, info 
                         
     def get_nodes_adjacency(self):
@@ -559,6 +590,14 @@ class Routing(NetworkEnv):
     def get_num_nodes(self):
         return self.network.n_nodes
 
+    def get_final_info(self, info: dict):
+        agent_steps = self.agent_steps
+        for agent_step in agent_steps:
+            if agent_step != 0:
+                info["delays"].append(agent_step)
 
-# a = Discrete(5, start=0)
-# print(a.n)
+        return info
+
+
+a = Discrete(11, start=0)
+print(a.n)

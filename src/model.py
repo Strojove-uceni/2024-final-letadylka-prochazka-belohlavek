@@ -21,6 +21,9 @@ class MLP(nn.Module):
     def __init__(self, in_features, mlp_units, activation_fn, activation_on_output = True):
         super(MLP, self).__init__()
 
+        print("Shape of in_features: ", in_features)
+        print("MLP units are: ", mlp_units) 
+
         self.activation = activation_fn
 
 
@@ -43,6 +46,9 @@ class MLP(nn.Module):
     # Define forward pass for the MLP 
     def forward(self, x):
         
+        # print("Shape of x is: ", x.shape)
+
+
         # Inter layers
         for module in self.linear_layers[:-1]:
             x = self.activation(module(x))
@@ -148,9 +154,9 @@ class AttModel(nn.Module):
             - k transposed is of shape  (batch_size, num_heads, features_per_head, num_agents)
             - the multiplication result is of shape (batch_size, num_heads, num_agents, num_agents)
 
-        :masked_fill sets positions where mask == 0 to a large negative value - removes them from the attention computation practially
+        :masked_fill sets positions where mask == 0 to a large negative value - removes them from the attention computation practically
         """
-        att_weights = torch.matmul(q, k.transpose(2,3)) * self.attention_scale
+        att_weights = torch.matmul(q, k.transpose(2, 3)) * self.attention_scale
         att = att_weights.masked_fill(mask==0, -1e9)
         att = F.softmax(att, dim=-1)    # Softmax is applied along the last dimension to obtain normalized attention probabilities
 
@@ -180,8 +186,6 @@ class AttModel(nn.Module):
 
         return out, att_weights
 
-
-import torch.nn as nn
 
 class Q_Net(nn.Module):
     """
@@ -273,8 +277,10 @@ class NetMon(nn.Module):
         - updating node states with RNN
         - produces embeddings or features for nodes or agents in the graph
     """
-    def __init__(self, in_features, hidden_features: int, encoder_units, iterations, activation_fn, rnn_type="lstm",
-                rnn_carryover=True, agg_type="sum", output_neighbor_hidden = False, output_global_hidden = False
+    def __init__(self, in_features, hidden_features: int, encoder_units, iterations, activation_fn, 
+                rnn_type="lstm",
+                rnn_carryover=True, agg_type="sum", 
+                output_neighbor_hidden = False, output_global_hidden = False
     ) -> None:
         super().__init__()
 
@@ -416,7 +422,7 @@ class NetMon(nn.Module):
 
     def forward(self, x, mask, node_agent_matrix, max_degree=None, no_agent_mapping = False):
 
-        # print("Shape of x is: ", x.shape)
+        # print("Shape of x is: ", x.shape) # DeBUG
         # print("Shape of mask is: ", mask.shape)
         
         # This function contains steps (1), (2) and (3)
@@ -543,12 +549,12 @@ class NetMon(nn.Module):
             mask_sparse, mask_weights = dense_to_sparse(mask)   # Conversion to a sparse representation for the aggreagtion function
 
         if self.aggregation_def_type == 2:
-            H, C = self.state[0], self.state[1] # Inti of additional aggregation types 
+            H, C = self.state[0], self.state[1] # Init of additional aggregation types 
 
         # Iteration
         for it in range(self.iterations):
             if self.output_neighbor_hidden and it == self.iterations-1:
-                # Won't comment on this now
+               
                 if self.aggregation_def_type == 2:
                     # we know that the aggregation step will exchange the hidden states
                     # (and much more..) so we can just use them for the skip connection
@@ -644,7 +650,7 @@ class NetMon(nn.Module):
         if self.state.numel() == 0:
             return
         
-        print(self.state.shape)
+        #print(self.state.shape)
 
         self.state = self.state.reshape(batch_size * n_agents, self.num_states, -1).transpose(0,1) # num_states will be later defined within __init__
 

@@ -40,7 +40,7 @@ class ShortestPath:
             target_node = plane.target
 
             if current_node == target_node:
-                #act[i] = 0 # This cannot be here since our planes cannot stop in the air
+                act[i] = 0 # This cannot be here since our planes cannot stop in the air, but the plane is finished so proly fine i think
                 continue
 
             # Get the next waypoint on the flight path
@@ -52,7 +52,8 @@ class ShortestPath:
 
                 # Now we choose an edge
                 if current_edge.get_other_node(plane.now) == next_node:
-                    act[i] = index + 1 # Should the + 1 be here? I dunno now
+                    act[i] = index + 1 # This is fine i think 
                     break
+
         return act
     

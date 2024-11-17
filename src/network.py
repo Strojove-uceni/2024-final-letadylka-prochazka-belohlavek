@@ -6,6 +6,7 @@ from networkx.classes.function import path_weight
 from collections import defaultdict
 
 
+
 class Node:
     """
     A waypoint in the airspace.
@@ -143,7 +144,6 @@ class Network:
                 key=lambda edge_index: self.edges[edge_index].get_other_node(i))
             
 
-
     def update_shortest_paths(self):
         """
         Calculate shortest paths and store them in self.shortest.paths. 
@@ -192,6 +192,40 @@ class Network:
                 self.adj_mat[i, neighbor] = 1
 
 
+    def render(self, planes):
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+        last = self.nodes[self.n_nodes-17:self.n_nodes]
+        node_colors = ['pink' if node in last else 'lightblue' for node in self.nodes]
+
+
+        positions = {node: coordinates for node, coordinates in zip(self.G.nodes, self.coordinates)}
+        #nx.draw_networkx(self.G, positions, with_labels=True, node_color = "pink")
+        nx.draw_networkx_nodes(self.G, positions, node_color =node_colors)
+        nx.draw_networkx_edges(self.G, positions, edge_color='gray')
+        nx.draw_networkx_labels(self.G, positions, font_size=5, font_color='black', ax=ax)
+        
+        for plane in planes:
+            x, y = self.nodes[plane.now].x, self.nodes[plane.now].y
+            ax.plot(x,y, marker=(3,0,0), markersize = 15, markerfacecolor = 'red', markeredgecolor='k', label=f'Plane {plane.id}')
+
+        # plt.show()
+        # time.sleep(5)
+        # plt.close()
+        fig.canvas.draw()
+        plt.pause(5)
+        plt.ioff()
+        plt.close(fig)
+        
+
+
+
+
+
+
+
+
 
 ## HERE YOU CAN CHECK WHAT IS HAPPENING IN THE UPDATE SHORTEST PATH FUNCTION
 # # Create a graph with nodes and edges
@@ -232,5 +266,7 @@ class Network:
 # print(int(1 in a))
 
 
-b = [[1,2,1], [3,4,5]]
-print(np.array(b))
+# b = [[1,2,1], [3,4,5]]
+# print(np.array(b))
+
+

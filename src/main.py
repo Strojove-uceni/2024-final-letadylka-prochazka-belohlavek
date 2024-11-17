@@ -6,8 +6,11 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 import copy
+import traceback
+import json
 from collections import defaultdict
 from tqdm import tqdm
+
 
 from replay_buffer import ReplayBuffer
 from model import DGN, DQNR, DQN, MLP, NetMon
@@ -16,6 +19,8 @@ from routing import Routing
 from wrapper import NetMonWrapper
 from policy import ShortestPath
 from buffer import Buffer
+from pathlib import Path
+from torch.utils.tensorboard.writer import SummaryWriter
 from util import (
     dim_str_to_list,
     filter_dict,
@@ -25,23 +30,22 @@ from util import (
     set_attributes,
     set_seed,
 )
+from eval import evaluate
 
-# Loading matricies and points
-import json
 
-# Define the file path
+
+# File path
 file_path = "data/sparse_points.json"
 
 # Load sparse_points from the JSON file
 with open(file_path, 'r') as f:
     sparse_points = [tuple(point) for point in json.load(f)]  # Convert lists back to tuples
 
-
 # Some start parameters
 adj_mat = np.load("data/ad_mat.npy")
 dist_mat = np.load("data/dist_mat.npy")
-n_planes = 20
-n_neighbors = np.count_nonzero(adj_mat[0,:])
+n_planes = 10
+n_neighbors = 10 # np.count_nonzero(adj_mat[0,:])
 
 
 # ENV var
@@ -57,6 +61,8 @@ env = Routing(network, n_planes, env_var, adj_mat, dist_mat, k=n_neighbors)
 
 
 
+
+
 # Define activation function
 activ_f = 'gelu'
 activation_function = getattr(F, activ_f)
@@ -64,19 +70,37 @@ activation_function = getattr(F, activ_f)
 # Dynamically resets the environment
 n_agents, agent_obs_size, n_nodes, node_obs_size = reset_and_get_sizes(env) 
 
+env.render()
+
+print("Agent observation size: ", agent_obs_size)
+print("Node observation size: ", node_obs_size)
+
+
+
 netmon_dim = 128
 hidden_dim = [512,256]
-netmon_enc_dim = [512,256]
+netmon_enc_dim = [1024,512,256]
 netmon_iterations = 3
 netmon_rnn_type = "lstm"
 netmon_rnn_carryover = True
-netmon_agg_type = "sum"
+netmon_agg_type = "sum" # "gcn", "graphsage"
 netmon_neighbor = True
 netmon_global = True
 device = 'cpu' # For now
+target_update_steps = 0     # Number of steps between target model updates (0 for smooth updates)
+tau = 0.01  # Interpolatin factor for smooth target model updates
+eval_episodes = 1 # Default 1000
+eval_episode_steps = 30 # Default = 300  - maximum number of steps per eval episode
+eval_output_detailed = True # Default
+output_node_state_aux = False # Default
+
 
 # Use NetMon - init is rather long :)
-netmon = NetMon(node_obs_size, netmon_dim, netmon_enc_dim , iterations=netmon_iterations, activation_fn=activation_function,
+netmon = NetMon(node_obs_size,  # 'in_features' in init
+                netmon_dim,     # 'hidden_features' in init
+                netmon_enc_dim , # 'encoder_units' in init
+                iterations=netmon_iterations, 
+                activation_fn=activation_function,
                 rnn_type= netmon_rnn_type, rnn_carryover=netmon_rnn_carryover, agg_type=netmon_agg_type,
                 output_neighbor_hidden=True, output_global_hidden=netmon_global
                 ).to(device)    # Move to device
@@ -94,16 +118,18 @@ netmon_summary = netmon.summarize(summary_node_obs, summary_node_adj, summary_no
 
 
 
-# Will explain later
+
 node_state_size = netmon.get_state_size()
 
-node_aux_size = 0 if env.get_node_aux() is None else len(env.get_node_aux()[0])
+node_aux_size = 0 if env.get_node_aux() is None else len(env.get_node_aux()[0]) # = n_waypoints
 
 # Now we wrap the whole netmon class with a Wrapper - agents will use observations from netmon
-netmon_startup_iterations = 1
+netmon_startup_iterations = 1   # Number of MP interations after the env reset - before first step
 env = NetMonWrapper(env, netmon, netmon_startup_iterations)
 _, agent_obs_size, _, _ = reset_and_get_sizes(env)  # Observation length
 
+print(f"Node state size: {node_state_size}")    # 256
+print(f"Agent observation size: {agent_obs_size}")  # 3263
 
 
 
@@ -130,20 +156,15 @@ model = model.to(device)
 model_has_state = hasattr(model, "state")
 aux_model = None
 
-args = 0
+args = None
 # Choosing the policy for decisions, 'env.action_space.n' is equal to the number of choice the agent can perform
 policy = ShortestPath(env, None, env.action_space.n, args)
-
-
-# Some evaluation, not right now
-#...
-#
 
 
 
 ### Training ###
 learning_rate = 0.001
-aux_loss_coeff = 0.0 # Dunno what this exactly means
+aux_loss_coeff = 0.1 
 parameters = list(model.parameters()) + list(netmon.parameters())
 if node_aux_size > 0 and aux_loss_coeff > 0:
     aux_model = MLP(node_state_size, (node_state_size, node_aux_size), activation_function, activation_on_output=False)
@@ -153,376 +174,424 @@ if node_aux_size > 0 and aux_loss_coeff > 0:
 # Init optimizer for training
 optimizer = optim.AdamW(parameters, lr = learning_rate) # Adam with weight decay
 
-state_len = model.get_state_len() if model_has_state else 0
+state_len = model.get_state_len() if model_has_state else 0 # 0 for DGN
 
 
 # Init buffer
 seed = 1
-capacity = 200 # this is too much for my pc 200000
+capacity = 200 # Default: 200000 but that is too much for my pc
 replay_half_precision = True 
 buff = ReplayBuffer(seed, capacity, n_agents, agent_obs_size, state_len, n_nodes, 
                     node_obs_size, node_state_size, node_aux_size, half_precision=replay_half_precision)
 
 # Temp log variables
-log_buffer_size = 100   # 1000
+log_buffer_size = 100   # Default: 1000
 log_reward = Buffer(log_buffer_size, (n_planes,), np.float32) # Init of buffer
-buffer_plot_last_n = 50   # 5000
+buffer_plot_last_n = 50   # Default: 5000
 
+
+# This is for evaluation and logging 
 log_info = defaultdict(lambda: Buffer(log_buffer_size, (1,), np.float32))
+comment = "_"
+if hasattr(env, "env_var"):
+    comment += f"R{env.env_var.value}"
+if netmon is not None:
+    comment += "_netmon"
+writer = SummaryWriter(comment=comment)
 
 
-#  Just some summary comments
-#...
-#
 
-
-# Define some reward, but i think this is for the overall graph training #TODO: Check why it is here
+# Define reward
 best_mean_reward = -float("inf")
-
-# TODO: Check this
 exception_training = None
 exception_evaluation = None
 
 
-# try:
-    # Some summary here
-    #...
+try:
 
-# Variables for the transition buffer
-netmon_info = next_netmon_info = (0,0,0)
-buffer_state = buffer_node_state = 0
-buffer_node_aux = 0
-# Maybe render environment here
-# env.render()
-
-episode_step = None
-episode_steps = 300
-current_episode = 0
-episode_done = False
-training_iteration = 0
-
-total_steps = 100 # 1e6
+    # Variables for the transition buffer
+    netmon_info = next_netmon_info = (0,0,0)
+    buffer_state = buffer_node_state = 0
+    buffer_node_aux = 0
 
 
-# tdqm is used just so everything looks nice
-for step in tqdm(range(1, int(total_steps)+ 1), miniters= 100, dynamic_ncols = True, disable=False): # Disable disables progress bar
-    
-    model.eval()    # Set the model into evaluation state 
+    episode_step = None
+    episode_steps = 300 # Default
+    current_episode = 0
+    episode_done = False
+    training_iteration = 0
+    disable_prog = False
+    total_steps = 100 # Default: 1e6
 
-    netmon.eval()   # Set the model into evaluation state
 
-    if episode_step is None or episode_done:
-        # Reset episode values
-        episode_step = 0
+    # tdqm is used just so everything looks nice
+    for step in tqdm(range(1, int(total_steps)+ 1), miniters= 100, dynamic_ncols = True, disable=disable_prog): # Disable disables progress bar
         
-        obs, adj = env.reset()  # Basically inits the environment
-        current_episode += 1
+        model.eval()    # Set the model into evaluation state 
 
-        # Reset states
-        last_state = None
+        netmon.eval()   # Set the model into evaluation state
 
-    # Set current state
-    if model_has_state:
-        model.state = last_state
+        if episode_step is None or episode_done:
+            # Reset episode values
+            episode_step = 0
+            
+            obs, adj = env.reset()  # Inits the environment
+            current_episode += 1
 
-    # Using netmon
-    buffer_node_state = (env.last_netmon_state.cpu().detach().numpy() if env.last_netmon_state is not None else 0)  # Move to the cpu, .detach() - removes the tensor from the computational graph, conversion to numpy array
+            # Reset states
+            last_state = None
+
+        # Set current state
+        if model_has_state:
+            model.state = last_state
+
+        # Using netmon
+        buffer_node_state = (env.last_netmon_state.cpu().detach().numpy() if env.last_netmon_state is not None else 0)  # Move to the cpu, .detach() - removes the tensor from the computational graph, conversion to numpy array
+        
+        netmon_info = env.get_netmon_info()     # Returns (node_obs, node_adj, node_agent_mat)
+        if hasattr(env, "get_node_aux"):
+            buffer_node_aux = env.get_node_aux()
+
+        # Get actions based on policy and execute step in environment (This changes model states)
+        joint_actions = policy(obs, adj)
+        next_obs, next_adj, reward, done, info = env.step(joint_actions)    # Perform step within the environment
     
-    netmon_info = env.get_netmon_info()
-    if hasattr(env, "get_node_aux"):
-        buffer_node_aux = env.get_node_aux()
 
-    # Get actions and execute step in environment (This changes model states)
-    joint_actions = policy(obs, adj)
+        # Remember state for the buffer, update state afterwards
+        if model_has_state:
+            buffer_state = last_state.cpu().numpy() if last_state is not None else 0
+            done_mask = ~torch.tensor(done, dtype=torch.bool, device=device).view(1,-1,1)
+            last_state = model.state * done_mask
 
-    next_obs, next_adj, reward, done, info = env.step(joint_actions)    # Perform step within the environment
+        # Use netmon
+        if netmon is not None:
+            next_netmon_info = env.get_netmon_info()
+        
+        episode_step += 1
+        episode_done = episode_step >= episode_steps
 
-    # Remember state for the buffer, update state afterwards
-    if model_has_state:
-        buffer_state = last_state.cpu().numpy() if last_state is not None else 0
-        done_mask = ~torch.tensor(done, dtype=torch.bool, device=device).view(1,-1,1)
-        last_state = model.state * done_mask
+        # Add info to the replay buffer
+        buff.add(obs, joint_actions, reward, next_obs, adj, next_adj, done, episode_done, buffer_state, 
+                    buffer_node_state, buffer_node_aux, *netmon_info, *next_netmon_info)
 
-    # Use netmon
-    if netmon is not None:
-        next_netmon_info = env.get_netmon_info()
-    
-    episode_step += 1
-    episode_done = episode_step >= episode_steps
+        
+        # 'Move' observations and adjacency
+        obs = next_obs
+        adj = next_adj
 
-    # Add info to the replay buffer
-    buff.add(obs, joint_actions, reward, next_obs, adj, next_adj, done, episode_done, buffer_state, 
-                buffer_node_state, buffer_node_aux, *netmon_info, *next_netmon_info)
+        ## Training stats
 
-    
-    # 'Move' observations and adjacency
-    obs = next_obs
-    adj = next_adj
+        """
+            The code below gathers information and saves it for evaluation
+        """
+        # log number of steps for all agents after each episode
+        log_reward.insert(reward.mean())
 
-    ## Training stats
+        # get all delays
+        if episode_done:
+            info = env.get_final_info(info)
+        for k, v in info.items():
+            log_info[k].insert(v)
 
-    """
-        Won't go into this right now
-    """
-    # # log number of steps for all agents after each episode
-    # log_reward.insert(reward.mean())
-    # # get all delays
-    # if episode_done:
-    #     info = env.get_final_info(info)
-    # for k, v in info.items():
-    #     log_info[k].insert(v)
+        mean_output = {}
 
-    # mean_output = {}
+        # Args to define
+        debug_plots = False # Default to false
+        step_before_train = 2000 # Default
+        step_between_train = 1 # Default from authors
 
-    # if step % log_buffer_size == 0:
-    #     base_path = Path(writer.get_logdir())
-    #     if args.debug_plots:
-    #         if netmon is not None:
-    #             buff.save_node_state_diff_plot(
-    #                 base_path / f"z_img_node_diff_{step}.png",
-    #                 buffer_plot_last_n,
-    #             )
-    #             buff.save_node_state_std_plot(
-    #                 base_path / f"z_img_node_std_{step}.png", buffer_plot_last_n
-    #             )
-    #         if (netmon is not None and isinstance(env.env, Routing)) or isinstance(
-    #             env, Routing
-    #         ):
-    #             if env.record_distance_map:
-    #                 env.save_distance_map_plot(
-    #                     base_path / f"z_img_spawn_distance_{step}.png"
-    #                 )
-    #                 env.distance_map.clear()
-    #             if env.random_topology or step == log_buffer_size:
-    #                 import networkx as nx
-    #                 import matplotlib.pyplot as plt
+        if step % log_buffer_size == 0:
+            base_path = Path(writer.get_logdir())
 
-    #                 nx.draw_networkx(
-    #                     env.G,
-    #                     pos=nx.get_node_attributes(env.G, "pos"),
-    #                     with_labels=True,
-    #                     node_color="pink",
-    #                 )
-    #                 plt.savefig(base_path / f"z_img_topology_{step}.png")
-    #                 plt.clf()
+            if debug_plots:
+                if netmon is not None:
+                    buff.save_node_state_diff_plot(
+                        base_path / f"z_img_node_diff_{step}.png",
+                        buffer_plot_last_n,
+                    )
+                    buff.save_node_state_std_plot(
+                        base_path / f"z_img_node_std_{step}.png", buffer_plot_last_n
+                    )
+                if (netmon is not None and isinstance(env.env, Routing)) or isinstance(
+                    env, Routing
+                ):
+                    if env.record_distance_map:
+                        env.save_distance_map_plot(
+                            base_path / f"z_img_spawn_distance_{step}.png"
+                        )
+                        env.distance_map.clear()
+                    if step == log_buffer_size:
+                        import networkx as nx
+                        import matplotlib.pyplot as plt
 
-    #     mean_reward = log_reward.mean()
-    #     log_reward.clear()
-    #     for k, v in log_info.items():
-    #         if log_info[k]._count > 0:
-    #             mean_output[k] = v.mean()
-    #             v.clear()
+                        nx.draw_networkx(
+                            env.G,
+                            pos=nx.get_node_attributes(env.G, "pos"),
+                            with_labels=True,
+                            node_color="pink",
+                        )
+                        plt.savefig(base_path / f"z_img_topology_{step}.png")
+                        plt.clf()
 
-    #     eps_str = (
-    #         f"  eps: {policy._epsilon:.2f}" if hasattr(policy, "_epsilon") else ""
-    #     )
-    #     tqdm.write(
-    #         f"Episode: {current_episode}"  # print current episode
-    #         f"  step: {step/1000:.0f}k"
-    #         f"  reward: {mean_reward:.2f}"
-    #         f"{''.join(f'  {k}: {v:.2f}' for k, v in mean_output.items())}"
-    #         f"{eps_str}"
-    #         f"{' | BEST' if mean_reward > best_mean_reward else ''}"
-    #     )
+            mean_reward = log_reward.mean()
+            log_reward.clear()
+            for k, v in log_info.items():
+                if log_info[k]._count > 0:
+                    mean_output[k] = v.mean()
+                    v.clear()
 
-    #     if writer is not None:
-    #         writer.add_scalar("Iteration", training_iteration, step)
-    #         writer.add_scalar("Train/Reward", mean_reward, step)
-    #         for k, v in mean_output.items():
-    #             writer.add_scalar("Train/" + k.capitalize(), v, step)
-    #         if hasattr(policy, "_epsilon"):
-    #             writer.add_scalar("Train/Epsilon", policy._epsilon, step)
-    #         writer.add_scalar("Train/Episode", current_episode, step)
-    #         writer.flush()
+            tqdm.write(
+                f"Episode: {current_episode}"  # print current episode
+                f"  step: {step/1000:.0f}k"
+                f"  reward: {mean_reward:.2f}"
+                f"{''.join(f'  {k}: {v:.2f}' for k, v in mean_output.items())}"
+                f"{' | BEST' if mean_reward > best_mean_reward else ''}"
+            )
 
-    #         if mean_reward > best_mean_reward:
-    #             torch.save(
-    #                 get_state_dict(model, netmon, args.__dict__),
-    #                 Path(writer.get_logdir()) / "model_best.pt",
-    #             )
-    #             best_mean_reward = mean_reward
+            writer.add_scalar("Iteration", training_iteration, step)
+            writer.add_scalar("Train/Reward", mean_reward, step)
+            for k, v in mean_output.items():
+                writer.add_scalar("Train/" + k.capitalize(), v, step)
+            writer.add_scalar("Train/Episode", current_episode, step)
+            writer.flush()
 
-    # if (    # These are really not defined anywhere
-    #     step < step_before_train or buff.count < mini_batch_size
-    #     or step % step_between_train != 0
-    # ):
-    #     continue
+            if mean_reward > best_mean_reward:
+                # torch.save(
+                #     get_state_dict(model, netmon, args.__dict__),
+                #     Path(writer.get_logdir()) / "model_best.pt",
+                # )
+                best_mean_reward = mean_reward
 
-    # Now to the actual training part
-
-    training_iteration += 1
-
-    loss_q = torch.zeros(1, device=device)
-    loss_aux = torch.zeros(1, device=device)
-    loss_att = torch.zeros(1, device=device)
-
-    model.train()   # Set the model into the training mode
-    netmon.train()
-
-    # Some params, should be somewhere else
-    mini_batch_size = 10 # Maybe should be 1
-    sequence_length = 1
-    gamma = 0.98
-    att_regularization_coeff = 0.03
-
-    for t, batch in enumerate(buff.get_batch(mini_batch_size, device=device, sequence_length=sequence_length)):
-        if model_has_state and t == 0:
-            # Load the state from the begining
-            model.state = batch.agent_state
+        # For full code, this has to be running
+        # if (step < step_before_train or buff.count < mini_batch_size or step % step_between_train != 0):    
+        #     # step_before_train ensures that we make at least 2000 iterations to collect initial experience from the environment
+        #     # before we actually start the training - this servers as a warm-up phase -> we populate the replay buffer with experiences
+        #     continue
 
 
-        if t == 0:
-            # Get state from batch
-            netmon.state = batch.node_state
-        else:
-            # Reset netmon state if env episode was done in this step
-            netmon.state = last_netmon_state * (~last_batch_episode_done).view(-1,1,1)
 
-        # Run netmon step
-        network_obs = netmon(batch.node_adj, batch.node_adj, batch.node_agent_matrix)
+        # Now to the actual training part
+        training_iteration += 1
 
-        # print("Succesfull")
-        # raise Exception("Terminating the program.")   
+        loss_q = torch.zeros(1, device=device)
+        loss_aux = torch.zeros(1, device=device)
+        loss_att = torch.zeros(1, device=device)
 
-        # Netmon aux loss, just a calculation
-        if aux_model is not None:
+        model.train()   # Set the model into the training mode
+        netmon.train()  # Set the model into the training mode
+
+        # Some params, should be somewhere else
+        mini_batch_size = 1     # The number of individual experiences that are drawn from the replay buffer
+        sequence_length = 1
+        gamma = 0.98
+        att_regularization_coeff = 0.03
+
+        for t, batch in enumerate(buff.get_batch(mini_batch_size, device=device, sequence_length=sequence_length)):
+
+            if model_has_state and t == 0:
+                # Load the state from the begining
+                model.state = batch.agent_state
+
+            if t == 0:
+                # Get state from batch
+                netmon.state = batch.node_state
+            else:
+                # Reset netmon state if env episode was done in this step
+                netmon.state = last_netmon_state * (~last_batch_episode_done).view(-1,1,1)
+
+            # Run netmon step
+            network_obs = netmon(batch.node_obs, batch.node_adj, batch.node_agent_matrix)   # Forward pass
+
+
+            # Netmon aux loss
             aux_prediction = aux_model(netmon.state)
             loss_aux = (loss_aux + torch.mean((aux_prediction - batch.node_aux) **2)/sequence_length)
 
-        # Replace observation in place
-        net_obs_dim = network_obs.shape[-1]     # Take last 
-        batch.obs[:, :, -net_obs_dim:] = network_obs
+            # Replace observation in place
+            net_obs_dim = network_obs.shape[-1]     # Take last 
+            batch.obs[:, :, -net_obs_dim:] = network_obs
 
-        # Some code for t > 0:
-        # ...model_checkpoint_steps
-        # Let's now remember the correct netmon state for gradient calculation
-        last_netmon_state = netmon.state
+            # Let's now remember the correct netmon state for gradient calculation
+            last_netmon_state = netmon.state
 
-        # Done episodes, this is here, otherwise masking would be incorrect
-        last_batch_episode_done = batch.episode_done
-        last_batch_idx = batch.idx
+            # Done episodes, this is here, otherwise masking would be incorrect
+            last_batch_episode_done = batch.episode_done
+            last_batch_idx = batch.idx
 
-        q_values = model(batch.obs, batch.adj)
-        # Run target module
-        with torch.no_grad():
+            q_values = model(batch.obs, batch.adj)  # Estimate the expected reward for each possible action
+
+            # Run target module
+            with torch.no_grad():
+                if model_has_state:
+                    # This is here to avoid storing state and next state of the current model
+                    model_tar.state = model.state.detach()
+
+                # Get network observation with netmon
+                next_network_obs = netmon(batch.next_node_obs, batch.next_node_adj, batch.next_node_agent_matrix)
+                next_net_obs_dim = next_network_obs.shape[-1]#model_checkpoint_steps
+                next_q = model_tar(batch.next_obs, batch.next_adj)
+                next_q_max = next_q.max(dim=2)[0]
+
+
             if model_has_state:
-                # This is here to avoid storing state and enxt state of the current model
-                model_tar.state = model.state.detach()
-
-            # Get network observation with netmon
-            next_network_obs = netmon(batch.next_node_obs, batch.next_node_adj, batch.next_node_agent_matrix)
-            next_net_obs_dim = next_network_obs.shape[-1]#model_checkpoint_steps
-            next_q = model_tar(batch.next_obs, batch.next_adj)
-            next_q_max = next_q.max(dim=2)[0]
+                # If the next step belongs to a new episode we mask agent state
+                state_mask = ~batch.done * (~batch.episode_done).view(-1,1)
+                model.state = model.state * state_mask.unsqueeze(-1)
 
 
-        if model_has_state:
-            # If the next step belongs to a new episode we mask agent state
-            state_mask = ~batch.done * (~batch.episode_done).view(-1,1)
-            model.state = model.state * state_mask.unsqueeze(-1)
+            # DQN target with 1 step bootstrapping
+            chosen_action_target_q = (batch.reward + (~batch.done) * gamma * next_q_max)
 
 
-        # DQN target with 1 step bootstrapping
-        chosen_action_target_q = (batch.reward + (~batch.done) * gamma * next_q_max)
+            # Original DGN loss on all actions - even unused ones. This can be adjusted so that it is DQN loss just on selected actions
+            q_target = q_values.detach()
+            #print("Shape of q_target: ", q_target.shape)
+            #print("Shape of batch.action.unsqeeze: ", batch.action.unsqueeze(-1).shape)
+            #rint("Shape of chosen action target: ", chosen_action_target_q.unsqueeze(-1).shape)
+            q_target = torch.scatter(q_target, -1, batch.action.unsqueeze(-1), chosen_action_target_q.unsqueeze(-1))
+
+            # Combined value loss for each sample in the batch
+            td_error = q_values - q_target
+
+            # Update of q-value loss
+            loss_q = loss_q + torch.mean(td_error.pow(2)) / sequence_length
 
 
-        # Original DGN loss on all actions - even unused ones. This can be adjusted so that it is DQN loss just on selected actions
-        q_target = q_values.detach()
-        q_target = torch.scatter(q_target, -1, batch.action.unsqueeze(-1), chosen_action_target_q.unsqueeze(-1))
+            # The following code is for attention. We have it, but i am going to leave it within the if hassattr statement
+            if hasattr(model, 'att_weights') and att_regularization_coeff > 0:
 
-        # Combined value loss for each sample in the batch
-        td_error = q_values - q_target
+                # First KL_div argument is given in log-probability
+                attention = F.log_softmax(torch.stack(model.att_weights), dim = -1) # Note: .stack just concatenates a sequence of tensors along a new dimension
 
-        # Update of q-value loss
-        loss_q = loss_q + torch.mean(td_error.pow(2)) / sequence_length
+                # Target model contains the attention weights for the next step
+                target_attention = F.softmax(torch.stack(model_tar.att_weights), dim=-1)
+
+                # Remember the original shape
+                old_att_shape = attention.shape
+
+                # Now we need to join first dimensions to apply KL divergence
+                """
+                    This moves it from 
+                            -   (softmax_dim, mini_batch_size, num_head, n_agents, n_agents) to     [2,1,8,20,20]
+                                    (softmax_dim * mini_batch_size * num_head * n_agents, n_agents) [320,20]
+                """
+                attention = attention.view(-1, n_agents)    
+                target_attention = target_attention.view(-1, n_agents)
+
+                # Now calculate pointwise KL divergence
+                kl_div = F.kl_div(attention, target_attention, reduction="none")
+
+                # We then bring the tensor back to the old shape 
+                #       (num_layers, batch_size, heads, n_agents_source, n_agents_dest)
+                kl_div = kl_div.view(old_att_shape)
+
+                # Then we transpose and reduce last three dimensions with sum
+                """
+                    - first transpose results in (n_agents_source, batch_size, heads, num_layers, n_agents_dest)
+                    - second one results in (batch_size, n_agents_source, heads, num_layers, n_agents_dest)
+                    - then we reduce with sum to (batch_size, n_agents_source, ...)
+
+                """
+                kl_div = kl_div.transpose(0, -2).transpose(0,1).sum(dim=(-1,-2,-3))
+
+                # Now we mask out done agents (their next step in already in a new episode)
+                # Reduction loss like 'batchmean', we clamp the number of not done agents with min 1 -> avoid division by zero
+                kl_div = (kl_div * (~batch.done)).sum() /torch.clamp((~batch.done).sum(), min =1)
+
+                loss_att = loss_att + kl_div / sequence_length
+
+        loss = (loss_q + att_regularization_coeff * loss_att + aux_loss_coeff * loss_aux)
+        optimizer.zero_grad()
+        loss.backward()
+
+        # Clip gradients to faciliate learning
+        torch.nn.utils.clip_grad_value_(parameters, 0.5)
+        torch.nn.utils.clip_grad_norm_(parameters, 1.0)
+
+        if aux_model is not None:
+            log_info["loss_aux"].insert(loss_aux.detach().mean().item())
+
+        log_info["q_values"].insert(q_values.detach().mean().item())
+        log_info["q_target"].insert(q_target.detach().mean().item())
+
+        log_info["loss"].insert(loss.item())
+        # only log q and attention loss if necessary
+        if hasattr(model, "att_weights") and att_regularization_coeff > 0:
+            log_info["loss_q"].insert(loss_q.item())
+            log_info["loss_att"].insert(loss_att.item())
+
+        if target_update_steps <= 0:
+            # smooth target update as in DGN
+            interpolate_model(model, model_tar, tau, model_tar)
+
+        elif training_iteration % target_update_steps == 0:
+            # regular target update
+            model_tar.load_state_dict(model.state_dict())
+            tqdm.write(f"Update network, train iteration {training_iteration}")
+
+        
+        # save checkpoints
+        # if step % args.model_checkpoint_steps == 0 and writer is not None:
+        #     torch.save(
+        #         get_state_dict(model, netmon, args.__dict__),
+        #         Path(writer.get_logdir()) / f"model_{int(step):_d}.pt",
+
+        # print("Succesfull")
+        # raise Exception("Terminating the program.")    
 
 
-        # The following code is for attention. We have it, but i am going to leave it within the if hassattr statement
-        if hasattr(model, 'att_weights') and att_regularization_coeff > 0:
+except Exception as e:
+    exception_training = e
+    print(exception_training)
 
-            # First KL_div argument is given in log-probability
-            attention = F.log_softmax(torch.stack(model.att_weights), dim = -1) # Note: .stack just concatenates a sequence of tensors along a new dimension
+finally:
+    print("Clean exit")
+    del buff
+    if writer is not None:
+        try:
+            # Reset states
+            if hasattr(model, "state"):
+                model.state = None
+            if netmon is not None:
+                netmon.state = None
 
-            # Target model contains the attention weights for the next step
-            target_attention = F.softmax(torch.stack(model_tar.att_weights), dim=-1)
+            # Evaluate 
+            print("Performing evaluation:")
+            metrics = evaluate(
+                env, 
+                policy,
+                eval_episodes,
+                eval_episode_steps,
+                disable_prog,
+                Path(writer.get_logdir()) /"eval",
+                eval_output_detailed,
+                output_node_state_aux
 
-            # Remember the original shape
-            old_att_shape = attention.shape
+            )
 
-            # Now we need to join first dimensions to apply KL divergence
-            attention = attention.view(-1, n_agents)
+            print(json.dumps(metrics, indent = 4, sort_keys=True, default=str))
+
+        except Exception as e:
+            traceback.print_exc()
+            exception_evaluation = e
+        finally:
+
+            torch.save(get_state_dict(model, netmon, "args"),
+                Path(writer.get_logdir()) / "model_last.pt")
+            writer.flush()
+            writer.close()
 
 
-            # Now calculate pointwise KL divergence
-            kl_div = F.kl_div(attention, target_attention, reduction="none")
-
-            # We then bring the tensor back to the old shape 
-            #       (num_layers, batch_size, heads, n_agents_source, n_agents_dest)
-            kl_div = kl_div.view(old_att_shape)
-
-            # Then we transpose and reduce last three dimensions with sum
-            """
-                - first transpose results in (n_agents_source, batch_size, heads, num_layers, n_agents_dest)
-                - second one results in (batch_size, n_agents_source, heads, num_layers, n_agents_dest)
-                - then we reduce with sum to (batch_size, n_agents_source, ...)
-
-            """
-            kl_div = kl_div.transpose(0, -2).transpose(0,1).sum(dim=(-1,-2,-3))
-
-            # Now we mask out done agents (their next step in already in a new episode)
-            # Reduction loss like 'batchmean', we clamp the number of not done agents with min 1 -> avoid division by zero
-            kl_div = (kl_div * (~batch.done)).sum() /torch.clamp((~batch.done).sum(), min =1)
-
-            loss_att = loss_att + kl_div / sequence_length
-
-    loss = (loss_q + att_regularization_coeff * loss_att + aux_loss_coeff * loss_aux)
-    optimizer.zero_grad()
-    loss.backward()
-
-    # Clip gradients to faciliate learning
-    torch.nn.utils.clip_grad_value_(parameters, 0.5)
-    torch.nn.utils.clip_grad_norm_(parameters, 1.0)
-
-    if aux_model is not None:
-        log_info["loss_aux"].insert(loss_aux.detach().mean().item())
-
-    log_info["q_values"].insert(q_values.detach().mean().item())
-    log_info["q_target"].insert(q_target.detach().mean().item())
-
-    log_info["loss"].insert(loss.item())
-    # only log q and attention loss if necessary
-    if hasattr(model, "att_weights") and args.att_regularization_coeff > 0:
-        log_info["loss_q"].insert(loss_q.item())
-        log_info["loss_att"].insert(loss_att.item())
-
-    if args.target_update_steps <= 0:
-        # smooth target update as in DGN
-        interpolate_model(model, model_tar, args.tau, model_tar)
-
-    elif training_iteration % args.target_update_steps == 0:
-        # regular target update
-        model_tar.load_state_dict(model.state_dict())
-        tqdm.write(f"Update network, train iteration {training_iteration}")
+if exception_training is not None or exception_evaluation is not None:
+    if exception_training is not None and exception_evaluation is not None:
+        str_ex = "training and evaluation"
+    elif exception_training is not None:
+        str_ex = "training"
+    elif exception_evaluation is not None:
+        str_ex = "evaluation"
 
     
-    # save checkpoints
-    # if step % args.model_checkpoint_steps == 0 and writer is not None:
-    #     torch.save(
-    #         get_state_dict(model, netmon, args.__dict__),
-    #         Path(writer.get_logdir()) / f"model_{int(step):_d}.pt",
-
-    # print("Succesfull")
-    # raise Exception("Terminating the program.")    
-
-
-# except Exception as e:
-#     exception_training = e
-#     print(exception_training)
-
-# finally:
-    # print("Clean exit")
-del buff
-
+    raise SystemExit(f"An exception was raised during {str_ex} (see above).")
 
 
 
