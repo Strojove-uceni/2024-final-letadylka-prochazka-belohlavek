@@ -4,8 +4,6 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, SAGEConv, AntiSymmetricConv,GraphSAGE
 from torch_geometric.utils import dense_to_sparse
 from torch_geometric.nn.summary import summary
-
-
 from layernormlstm import LayerNormLSTMCell
 #
 
@@ -143,7 +141,7 @@ class AttModel(nn.Module):
         q, k, v = q.transpose(1,2), k.transpose(1,2), v.transpose(1,2)
 
         # Add head axis (we are keeping the same mask for all attention heads)
-        mask = mask.unsqueeze(1)
+        mask = mask.unsqueeze(1)    # (batch_size, 1, num_agents, num_agents) (1,1,20,20)
 
 
         # Now we calculate attention
@@ -246,6 +244,14 @@ class DGN(nn.Module):
         # Final q_input is of shape (batch_size, num_agents, hidden_features * (num_attention_layers +1))
         q = self.q_net(q_input)
 
+        # print(q.shape)
+        # print("Predicted Q_values:")
+        # for i in range(5):
+        #     for j in range(11):
+        #         print(int(q[0,i,j]), end="")
+        #     print("")
+        
+    
         return q    # is of shape (batch_size, num_agents, num_action)
         
 
@@ -300,10 +306,11 @@ class NetMon(nn.Module):
         self.aggregation_def_type = None
 
         # Agreggation
-        self.agg_type_str = agg_type
+        self.agg_type_str = agg_type    # GCN
         """
         Here they resolve different aggregation functions for different types of networks like GraphSAGE etc. 
         """
+     
 
         self.jk = None
         if "jk-cat" in agg_type:
@@ -335,10 +342,7 @@ class NetMon(nn.Module):
 
 
         # Now we will resolve the actual aggregation with the individual networks
-        if agg_type in ["sum", "mean"]:
-            self.aggregate = SimpleAggregation(agg=agg_type, mask_eye=False)
-            self.aggregation_def_type = 0
-        elif agg_type == "gcn":
+        if agg_type == "gcn":
             self.aggregate = GCNConv(hidden_features, hidden_features, improved=True)
             self.aggregation_def_type = 1
         elif agg_type == "sage":
@@ -355,7 +359,6 @@ class NetMon(nn.Module):
             if rnn_type != "none":
                 print(f"WARNING: Overwritten given rnn type {rnn_type} with 'none'.")
                 rnn_type = "none"
-
         elif "adgn" in agg_type:
             self.aggregate = JumpingKnowledgeADGN(hidden_features, num_iters=iterations, jk = self.jk)
             self.agg_type_str = agg_type + f" ({iterations} layer)"
@@ -366,8 +369,6 @@ class NetMon(nn.Module):
             if rnn_type != "none":
                 print(f"WARNING: Overwritten given rnn type {rnn_type} with 'none'.")
                 rnn_type = "none"
-
-
         elif agg_type == "antisymgcn":
             # Use single iteration so that we still get the last hidden node states
             self.aggregate = AntiSymmetricConv(hidden_features, num_iters=1)
@@ -392,11 +393,12 @@ class NetMon(nn.Module):
 
 
         # Update and observation encoding
-        self.rnn_type = rnn_type
+        self.rnn_type = rnn_type    # lstm
+
         if self.rnn_type == "lstm":
             self.rnn_obs = nn.LSTMCell(hidden_features, hidden_features)
             self.rnn_update = nn.LSTMCell(hidden_features, hidden_features)
-            self.num_states = 2 if rnn_carryover else 4
+            self.num_states = 2 if rnn_carryover else 4 # 2
         elif self.rnn_type == "lnlstm":
             self.rnn_obs = LayerNormLSTMCell(hidden_features, hidden_features)
             self.rnn_update = LayerNormLSTMCell(hidden_features, hidden_features)
@@ -415,14 +417,13 @@ class NetMon(nn.Module):
             raise ValueError(f"Unknown rnn type {self.rnn_type}")
 
         self.hidden_features = hidden_features
-        self.state_size = hidden_features * self.num_states
-
+        self.state_size = hidden_features * self.num_states     # 256
 
 
 
     def forward(self, x, mask, node_agent_matrix, max_degree=None, no_agent_mapping = False):
 
-        # print("Shape of x is: ", x.shape) # DeBUG
+        # print("Shape of x is: ", x.shape)
         # print("Shape of mask is: ", mask.shape)
         
         # This function contains steps (1), (2) and (3)
@@ -511,7 +512,7 @@ class NetMon(nn.Module):
         This function performs message passing and state updates over a specified number of iterations.
         It integrates both node features and graph structure.
 
-        :mask: it is the adjacency matrix of the graph 
+        :mask: it is the adjacency matrix of the graph -> (131,131)
         """
         batch_size, n_nodes, feature_dim = x.shape # (1, 131, 1463)
         
@@ -533,12 +534,7 @@ class NetMon(nn.Module):
         if self.rnn_type in ["lstm", "lnlstm"]:
             h0, cx0 = self.rnn_obs(h, (self.state[0], self.state[1])) # rnn.obs processes the encoded features h along with the previous states
             h, cx = h0, cx0
-        elif self.rnn_type == "gru":
-            h0 = self.rnn_obs(h, self.state[0])
-            h = h0
 
-
-            
         # Message passing iterations
         if self.iterations <= 0 and self.output_neighbor_hidden:
             last_neighbor_h = torch.zeros_like(h, device=h.device)  # Returns a tensor filled with 0s in the shape of h
@@ -637,9 +633,6 @@ class NetMon(nn.Module):
 
         return h, last_neighbor_h
 
-
-
-
     def state_reshape_in(self, batch_size, n_agents):
         """
         Reshapes the state of shape (batch_size, n_agents, self.get_state_len())
@@ -652,7 +645,7 @@ class NetMon(nn.Module):
         
         #print(self.state.shape)
 
-        self.state = self.state.reshape(batch_size * n_agents, self.num_states, -1).transpose(0,1) # num_states will be later defined within __init__
+        self.state = self.state.reshape(batch_size * n_agents, self.num_states, -1).transpose(0,1)
 
     def state_reshape_out(self, batch_size, n_agents):
         """
@@ -714,7 +707,6 @@ class NetMon(nn.Module):
             out_features += self.hidden_features
 
         return out_features
-
 
 
 

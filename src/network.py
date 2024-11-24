@@ -19,7 +19,6 @@ class Node:
         self.neighbors = []
         self.edges = []
 
-
 class Edge:
     """
     A connection between two waypoints.
@@ -38,8 +37,44 @@ class Edge:
             return self.start
         else:
             raise ValueError("Node not in edges.")
+# class Edge:
+#     """
+#     A connection between two waypoints.
+#     """
+
+#     def __init__(self, start, end, length, weather_condition) -> None:
+#         self.start = start
+#         self.end = end
+#         self.base_length = length
+#         self.weather_condition = weather_condition if weather_condition is not None else np.zeros((4,))
+#         self.length = self.get_weight()
+
+#     # Return the node index start/end
+#     def get_other_node(self, node): 
+#         if self.start == node:
+#             return self.end
+#         elif self.end == node:
+#             return self.start
+#         else:
+#             raise ValueError("Node not in edges.")
         
-        
+
+#     def update_weather_condition(self, weather_condition: float) -> None:
+#         """
+#             Update the weather condition and recalculate the weight.
+#         """
+#         self.weather_condition = weather_condition
+#         self.length = self.get_weight()
+
+#     def get_weight(self) -> float:
+#         """
+#         Weather coefficient mark how much does the weather influence the travel time -> prolonging the distance if unfavourable
+#             - they contain (wind_speed, temperature, pressure, storm_strength)
+#         """
+#         weather_coefficients = np.array([0.06, 0.01, 0.008, 0.1])
+#         return self.base_length * (1 + weather_coefficients.T @ self.weather_condition)
+    
+
 class Network:
     """
     Network that manages the creation of the network
@@ -63,6 +98,7 @@ class Network:
         self.shortest_paths_weights = None
 
         self.coordinates = coordinates  # Waypoint coordinates, oftype list of tuples
+        self.node_mask = None
 
 
     def build_network(self, adjacency_matrix, distance_matrix):
@@ -165,7 +201,7 @@ class Network:
             for end in self.shortest_paths[start]:
                 a = path_weight(self.G, self.shortest_paths[start][end], "weight")
                 # print(a)
-                self.shortest_paths_weights[start][end] = a# Calculate the weight between each shortest path
+                self.shortest_paths_weights[start][end] = a     # Calculate the weight between each shortest path
 
 
 
@@ -176,6 +212,7 @@ class Network:
         self.build_network(adjacency_matrix, distance_matrix)   # Build the network
         self.update_shortest_paths()    # Update the paths
         self.update_nodes_adjacency()   # Update node adjacency
+        self.create_node_mask()         # Create node mask for policy
 
 
     def get_nodes_adjacency(self):
@@ -210,19 +247,25 @@ class Network:
             x, y = self.nodes[plane.now].x, self.nodes[plane.now].y
             ax.plot(x,y, marker=(3,0,0), markersize = 15, markerfacecolor = 'red', markeredgecolor='k', label=f'Plane {plane.id}')
 
-        # plt.show()
-        # time.sleep(5)
-        # plt.close()
+  
         fig.canvas.draw()
         plt.pause(5)
         plt.ioff()
         plt.close(fig)
         
 
-
-
-
-
+    def create_node_mask(self):
+        """
+        Creates a mask for node edges. Policy decisions are masked with it. 
+        """
+        full_mask = []
+        for node in self.nodes:
+            num_edges = len(node.edges)
+            node_mask = [1] + [1] * num_edges
+            if num_edges < 10:  # Less than 10 neighbors
+                node_mask += [0] * (10-num_edges)
+            full_mask.append(node_mask)
+        self.node_mask = np.array(full_mask, dtype=np.float32)
 
 
 
@@ -262,11 +305,19 @@ class Network:
 
 # # print(b == shortest_paths_weights)
 
-# a = [1,2]
-# print(int(1 in a))
 
 
 # b = [[1,2,1], [3,4,5]]
 # print(np.array(b))
+arr = np.array([
+    [5, 2, 3],
+    [1, 0, 6],
+    [7, 8, 9]
+])
 
-
+# Mask array
+mask = np.array([
+    [1, 0, 1],
+    [0, 1, 0],
+    [1, 1, 0]
+])
