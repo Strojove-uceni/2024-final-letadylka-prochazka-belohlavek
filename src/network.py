@@ -89,13 +89,11 @@ class Network:
         self.G = nx.Graph()
         self.G_weight_key = "weight"
         self.shortest_paths = None
+        self.shortest_paths_weights = None
 
         self.adj_mat = adjacency_matrix
         self.dist_mat = distance_matrix
         self.n_neighbors = None
-
-        self.shortest_paths = None
-        self.shortest_paths_weights = None
 
         self.coordinates = coordinates  # Waypoint coordinates, oftype list of tuples
         self.node_mask = None
@@ -200,7 +198,6 @@ class Network:
         for start in self.shortest_paths:
             for end in self.shortest_paths[start]:
                 a = path_weight(self.G, self.shortest_paths[start][end], "weight")
-                # print(a)
                 self.shortest_paths_weights[start][end] = a     # Calculate the weight between each shortest path
 
 
@@ -309,15 +306,15 @@ class Network:
 
 # b = [[1,2,1], [3,4,5]]
 # print(np.array(b))
-arr = np.array([
-    [5, 2, 3],
-    [1, 0, 6],
-    [7, 8, 9]
-])
+# arr = np.array([
+#     [5, 2, 3],
+#     [1, 0, 6],
+#     [7, 8, 9]
+# ])
 
-# Mask array
-mask = np.array([
-    [1, 0, 1],
-    [0, 1, 0],
-    [1, 1, 0]
-])
+# # Mask array
+# mask = np.array([
+#     [1, 0, 1],
+#     [0, 1, 0],
+#     [1, 1, 0]
+# ])

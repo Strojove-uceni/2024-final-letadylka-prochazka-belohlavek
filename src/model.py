@@ -248,7 +248,7 @@ class DGN(nn.Module):
         # print("Predicted Q_values:")
         # for i in range(5):
         #     for j in range(11):
-        #         print(int(q[0,i,j]), end="")
+        #         print(int(q[0,i,j]), end=" ")
         #     print("")
         
     
@@ -906,4 +906,13 @@ class CommNet(DQNR):
         # manually reshape state in the end
         self._state_reshape_out(batch_size, n_agents)
         return self.q_net(h)
-         
+
+
+
+
+# a = [[1,2,4], [1,5,6]]
+# empt = []
+# for b in a:
+#     empt.extend(b)
+# print(empt)
+

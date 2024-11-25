@@ -44,30 +44,22 @@ class EpsilonGreedy:
             adj = (torch.tensor(adj, dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True))
 
             node_mask = torch.tensor(self.extract_node_mask(), dtype=torch.float32).to(device, non_blocking=True)   # Mask for invalid q_values
-            #print("Shape of node mask is: ", node_mask.shape)
-
+ 
             # Forward pass of the model
-            q_values = self.model(obs, adj)      
-   
+            q_values = self.model(obs, adj)
+
             # Squeezes first dimensino: 'batch_size' == 1
             q_values = q_values.cpu().squeeze(0).detach().numpy()
-            #print("Shape of q_values is: ", q_values.shape)
-                
             q_values[node_mask==0] = float('-inf')  # Set invalid edges to 0
     
-
             if self.enable_action_mask:
                 q_values[self.env.action_mask.nonzero()] = float("-inf")
 
         # Epsilon greedy action selections
-        #random_actions = np.random.randint(self.action_space, size = actions.shape[0])
         random_actions = self.get_random_actions(node_mask)     # We need to mask of random choices of edges that are 'non-existing'
-        #print("Random actions are:", random_actions)
         random_filter = np.random.rand(actions.shape[0]) < self.epsilon
-        #print("Random filter is: ", random_filter)
-
+        
         actions = (np.argmax(q_values, axis=-1)) * ~random_filter + random_filter*random_actions
-        #print(actions)
         
 
         if (self.epsilon > 0 and self.step > self.step_before_train and self.step % self.epsilon_update_freq == 0):
@@ -117,19 +109,7 @@ class EpsilonGreedy:
             actions.append(np.random.randint(valid_acts))
         return np.array(actions)
         
-    def check_actions(self, actions):
-        pass
 
-# dist = np.array([[2,3,4,0,0,32,1,31], [4,1,2,0,4,0,0,0]])
-
-
-# a = np.nonzero(dist[0,:])[0]
-
-# loc = [int(k) for k in a]
-# print(loc)  
-
-# loc.sort(key=lambda x : dist[0,x], reverse=False)
-# print(loc)
 
 
 

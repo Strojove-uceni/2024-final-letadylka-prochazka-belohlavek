@@ -46,9 +46,36 @@ with open(file_path, 'r') as f:
 # Some start parameters
 adj_mat = np.load("data/ad_mat.npy")
 dist_mat = np.load("data/dist_mat.npy")
-n_planes = 5
-n_neighbors = 3 # 3 by default # np.count_nonzero(adj_mat[0,:])
+n_planes = 10
+n_neighbors = 5 # 3 by default # np.count_nonzero(adj_mat[0,:])
 
+
+new_min = 10.0#0.1
+new_max = 50.0#1.0
+min = 135.19907434848324
+max = 4324.933341605337
+#dist_mat = ((dist_mat-min)/(max-min))*(new_max-new_min) + new_min
+# b = []
+# for i in range(131):
+#     non_zero_positions = np.nonzero(adj_mat[i,:])[0]         # Returns indicies, where adj_matrix[i, :] .!= 0
+#     g = []
+#     for j in range(131):
+#         if j in non_zero_positions:
+#             g.append(1)
+#         else:
+#             g.append(0)
+#     b.append(g)
+        
+# b = np.array(b)
+# dist_mat[b==0] = 0
+# mi = float('inf')
+# for k in range(131):
+#     for i in range(131):
+#         if dist_mat[k,i] < mi and dist_mat[k,i] > 0:
+#             mi = dist_mat[k,i]
+
+# print(mi)
+# print(dist_mat.max())
 
 # ENV var
 env_var = 1 # We choose k-neighbors
@@ -59,14 +86,10 @@ n_waypoints = np.shape(adj_mat)[0]
 network = Network(adj_mat, dist_mat, sparse_points)
 
 # Define type of environment
-env = Routing(network, n_planes, env_var, adj_mat, dist_mat, k=n_neighbors)
-
-
-
-
+env = Routing(network, n_planes, env_var, adj_mat, dist_mat, k=n_neighbors, enable_action_mask=False)
 
 # Define activation function
-activ_f = 'gelu'
+activ_f = 'leaky_relu'
 activation_function = getattr(F, activ_f)
 
 # Dynamically resets the environment
@@ -77,11 +100,22 @@ n_agents, agent_obs_size, n_nodes, node_obs_size = reset_and_get_sizes(env)
 print("Agent observation size: ", agent_obs_size)
 print("Node observation size: ", node_obs_size)
 
+from node2vec import Node2Vec
+# G = nx.erdos_renyi_graph(n=100, p=0.1)
+
+
+node2vec = Node2Vec(network.G, dimensions=64, walk_length=50, workers=4, p=1, q=1, weight_key='weight')
+
+mod = node2vec.fit(window=10, min_count=1, batch_words=4)
+
+embeddings = {node: mod.wv[node] for node in network.G.nodes()}
+
+
 
 
 netmon_dim = 128
-hidden_dim = [2048,1024,512,256]
-netmon_enc_dim = [1024,512,256]
+hidden_dim = [1024,512,256]
+netmon_enc_dim = [512,256]
 netmon_iterations = 3
 netmon_rnn_type = "lstm"
 netmon_rnn_carryover = True
@@ -164,7 +198,7 @@ debug_plots = False # Default to false
 step_before_train = 200 # Default 2000
 step_between_train = 1 # Default from authors 
 args = None
-epsilon = 1.5
+epsilon = 0.6
 epsilon_decay = 0.996
 epsilon_update_freq = 100
 
@@ -199,7 +233,7 @@ state_len = model.get_state_len() if model_has_state else 0 # 0 for DGN
 # Init buffer
 seed = 1
 capacity = 200 # Default: 200000 but that is too much for my pc
-replay_half_precision = True 
+replay_half_precision = False 
 buff = ReplayBuffer(seed, capacity, n_agents, agent_obs_size, state_len, n_nodes, 
                     node_obs_size, node_state_size, node_aux_size, half_precision=replay_half_precision)
 
@@ -212,7 +246,7 @@ buffer_plot_last_n = 50   # Default: 5000
 
 # This is for evaluation and logging 
 log_info = defaultdict(lambda: Buffer(log_buffer_size, (1,), np.float32))
-comment = "_"
+comment = "AHA"
 if hasattr(env, "env_var"):
     comment += f"R{env.env_var.value}"
 if netmon is not None:
@@ -239,7 +273,7 @@ try:
     training_iteration = 0
     disable_prog = False
     total_steps = 10000 # Default: 1e6
-    mini_batch_size = 1     # The number of individual experiences that are drawn from the replay buffer
+    mini_batch_size = 10     # The number of individual experiences that are drawn from the replay buffer
 
 
     # tdqm is used just so everything looks nice
@@ -376,7 +410,7 @@ try:
         if (step < step_before_train or buff.count < mini_batch_size or step % step_between_train != 0):    
             # step_before_train ensures that we make at least 2000 iterations to collect initial experience from the environment
             #   before we actually start the training - this servers as a warm-up phase -> we populate the replay buffer with experiences
-            #print("Skipped for step:", step)
+            print("Skipped for step:", step)
             continue
 
 
@@ -549,7 +583,7 @@ try:
 
         # print("Succesfull")
         # raise Exception("Terminating the program.")   
-    #print(env.planes[0].paths) 
+    
 
 
 except Exception as e:
@@ -559,7 +593,6 @@ except Exception as e:
 finally:
     print("Clean exit")
     del buff
-
 
     if writer is not None:
         try:
@@ -582,8 +615,11 @@ finally:
                 output_node_state_aux
 
             )
-
+            paths_to_save = env.save_paths()
+            with open('list_of_lists.json', 'w') as file:
+                json.dump(paths_to_save, file)
             print(json.dumps(metrics, indent = 4, sort_keys=True, default=str))
+            print(env.planes[0].paths)
 
         except Exception as e:
             traceback.print_exc()
@@ -594,6 +630,7 @@ finally:
                 Path(writer.get_logdir()) / "model_last.pt")
             writer.flush()
             writer.close()
+            
 
 
 if exception_training is not None or exception_evaluation is not None:
@@ -606,6 +643,7 @@ if exception_training is not None or exception_evaluation is not None:
 
     
     raise SystemExit(f"An exception was raised during {str_ex} (see above).")
+
 
 
 
