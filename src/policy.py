@@ -105,7 +105,7 @@ class EpsilonGreedy:
         """
         actions = []
         for i in range(node_mask.shape[0]):
-            valid_acts = len(node_mask[i].nonzero()[0]) # Get #of non-zero elements
+            valid_acts = len(node_mask[i].nonzero(as_tuple=True)[0]) # Get #of non-zero elements
             actions.append(np.random.randint(valid_acts))
         return np.array(actions)
         
@@ -162,3 +162,4 @@ class ShortestPath:
                     break
 
         return act
+    

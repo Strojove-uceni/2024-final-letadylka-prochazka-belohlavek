@@ -33,7 +33,6 @@ class Plane:
         self.visited_nodes = None
         self.speed = None       # Added
         self.on_edge = None
-
         self.run = -1
         self.paths = []
 
@@ -49,8 +48,6 @@ class Plane:
         self.speed = speed
         self.shortest_path_weight = shortest_path_weight
         self.visited_nodes = set([start])
-        #self.run += 1
-        #self.paths.append([]) # This should contain lists of nodes that will enable a reconstruction of paths
 
 
 class Routing(NetworkEnv):
@@ -147,14 +144,11 @@ class Routing(NetworkEnv):
 
         
         plane.reset(start=start, target=target, shortest_path_weight=self.network.shortest_paths_weights[start][target], speed=speed)
-
         if self.eval_info_enabled:
             plane.paths.append([])
-            plane.run += 1
+            plane.run +=1
 
-        if self.enable_action_mask:
-            # Remember path
-            # plane.paths[plane.run].append(int(start))    # Append start node
+        if self.enable_action_mask:            
             # Allow all links
             self.action_mask[plane.id] = 0
             self.action_mask[plane.id, 0] = plane.now != plane.target
@@ -208,6 +202,7 @@ class Routing(NetworkEnv):
                     [0,...,1,0,..,n_nodes-1]
             """
             observation += one_hot_list(j, self.network.n_nodes)    # This is equivalent to .extend()
+            #observation += self.network.embeddings[j]   # Get dense representation instead of a sparse onehot
 
             # Info of a waypoint
             num_planes = 0
@@ -224,11 +219,11 @@ class Routing(NetworkEnv):
             # Edge info
             for k in self.network.nodes[j].edges:   # Go through every edge that is connected to the waypoint
                 other_node = self.network.edges[k].get_other_node(j)    # Get conncted node
-
                 """
                 This gathering i do not really understand, but i will trust the original authors.
                 """
                 observation += one_hot_list(other_node, self.network.n_nodes)   # Again create a list of zeros with 1 on the index of the other_node
+                #observation += self.network.embeddings[other_node]
                 observation.append(self.network.edges[k].length)    # Add the info into the observation
                 observation.append(self.network.edges[k].load)      # Add the info into the observation
 
@@ -238,6 +233,7 @@ class Routing(NetworkEnv):
             if num_edges != 10:
                 for h in range(10-num_edges):
                     observation += one_hot_list(-1, self.network.n_nodes)
+                    #observation += one_hot_list(-1, 32)
                     observation.append(0)
                     observation.append(0)
 
@@ -297,16 +293,23 @@ class Routing(NetworkEnv):
             observation = []    # Init observation
 
             # Plane observation
+            #print(one_hot_list(self.planes[i].now, self.network.n_nodes))
             observation += one_hot_list(self.planes[i].now, self.network.n_nodes)       # Places 1 on the index of the node where the plane is
             observation += one_hot_list(self.planes[i].target, self.network.n_nodes)    # Places 1 on the index of the target node
+            #observation += self.network.embeddings[self.planes[i].now]
+            #observation += self.network.embeddings[self.planes[i].target]
 
             # Planes should know where they are coming from when traveling on an edge
             observation.append(int(self.planes[i].edge != -1))  # Check if the plane is on an edge
             if self.planes[i].edge != -1:   # If it is on an edge
                 other_node = self.network.edges[self.planes[i].edge].get_other_node(self.planes[i].now)     # Get to where it is going 
+                #observation += self.network.embeddings[other_node]
             else:
                 other_node = -1     # In a waypoint
+                #observation += one_hot_list(other_node, 32)
+
             observation += one_hot_list(other_node, self.network.n_nodes)   # Again, encode the position in a vector - if it is in a waypoint, it will create a 0 vector
+            # observation += self.network.embeddings[other_node]
 
             observation.append(self.planes[i].time)
             observation.append(self.planes[i].size) # TODO: WE WOULD LIKE TO ADD SPEED HERE!!!
@@ -319,6 +322,7 @@ class Routing(NetworkEnv):
                 other_node = self.network.edges[j].get_other_node(self.planes[i].now)
 
                 observation += one_hot_list(other_node, self.network.n_nodes)
+                #observation += self.network.embeddings[other_node]
                 observation.append(self.network.edges[j].length)
                 observation.append(self.network.edges[j].load)
 
@@ -330,6 +334,7 @@ class Routing(NetworkEnv):
             if num_edges != 10:
                 for i in range(10-num_edges):
                     observation += one_hot_list(-1, self.network.n_nodes)
+                    #observation += one_hot_list(-1, 32)
                     observation.append(0)
                     observation.append(0)
 
@@ -392,6 +397,7 @@ class Routing(NetworkEnv):
         spr = []
         self.agent_steps += 1
 
+        print("Actions are :",act)
 
         # Update old_node_plane_ids for q_values masking
         self.old_node_plane_ids = [plane.now for plane in self.planes]
@@ -416,14 +422,16 @@ class Routing(NetworkEnv):
                 if plane.edge == -1:
                     self.sum_planes_per_node[plane.now] += 1
             
-        
+            if act[i] == 0:
+                reward[i] -= 0.5
+
             # Select outgoing edge 
             if plane.edge == -1 and act[i] != 0:    # If at a waypoint
 
                 t = self.network.nodes[plane.now].edges[act[i]-1]   # Select an outgoing edge based on policy
 
                 # Note that planes that are handled earlier in this loop are prioritized
-                if self.network.edges[t].load + plane.size > 1: # Not possible to take this edge (added '=' so there can be two planes on an edge)
+                if self.network.edges[t].load + plane.size > 1.5: # Not possible to take this edge (added '=' so there can be two planes on an edge)
                     reward[i] -= 2.0
                     blocked += 1
                     
@@ -443,13 +451,18 @@ class Routing(NetworkEnv):
 
                     # Subrewards
                     if next_node == self.network.shortest_paths[plane.now][plane.target][1]:
-                        reward[i] += 1.0
+                        reward[i] += 3.0
                     else:
                         progres = dist_to_target - dist_after_step
                         if progres > 0:
+                            # c = min(np.exp(-0.001 * dist_to_target), 0.5)
+                            #print("C is: ", c)
                             reward[i] += min(np.exp(-0.001 * dist_to_target), 0.5)
                         else:
-                            reward[i] += min(abs(0.0002 * progres), 0.5)
+                            # d = min(abs(0.0002 * progres), 0.5)
+                            #print("D is: ", d)
+                            reward[i] -= min(abs(0.0002 * progres), 0.5)
+
                         # if self.compute_distance(next_node, plane.target) > self.compute_distance(plane.now, plane.target):
                         #     reward[i] -= 0.2
                     
@@ -463,11 +476,11 @@ class Routing(NetworkEnv):
                     plane.now = next_node
 
                     if plane.now in plane.visited_nodes:
-                        looped[i] = 1
-                        reward[i] -= 0.5
+                        looped[i] = 1 
+                        reward[i] -= 0.7
                     else:
                         plane.visited_nodes.add(plane.now)
-                        reward[i] += 0.005
+                        reward[i] += 0.5
 
         # INFO
         if self.eval_info_enabled:
@@ -475,7 +488,6 @@ class Routing(NetworkEnv):
                 This is gathers basic information about the current state of the Routing network
                     - this data is gathered only during evaluation phase
             """
-
             total_edge_load = 0
             occupied_edges = 0
             planes_on_edges = 0
@@ -508,14 +520,13 @@ class Routing(NetworkEnv):
             )
 
 
-
         # In-flight planes (=> effect of actions)
         for i in range(self.n_planes):
             plane = self.planes[i]
 
             if plane.edge != -1: # Plane on an edge
                 plane.time -= 1 # This number should be adjusted based on the calcuted time from actions
-                reward[i] -= 0.005
+                reward[i] -= 0.001
                 # Plane finished traversing the edge
                 if plane.time <= 0:
                     self.network.edges[plane.edge].load -= plane.size   # Remove the plane from the edge
@@ -542,26 +553,31 @@ class Routing(NetworkEnv):
 
             # The plane has reached the target
             has_reached_target = plane.edge == -1 and plane.now == plane.target     # If not on an edge and at the target waypoint
+
             if has_reached_target:
-                reward[i] += 10.0 
+                raise ValueError("a")
+            
+            if has_reached_target:
+                
+                reward[i] += 10.0 #* (1 - (len(plane.visited_nodes) /opt_hop_dist ))
                 done[i] = True
                 success[i] = True
 
                 # We need at least 1 step if we spawn at the target
                 opt_distance = max(plane.shortest_path_weight, 1)
-                #print(opt_distance)
                 
                 # Insert delays before resetting planes
                 delays_arrived.append(self.agent_steps[i])
-                spr.append(self.agent_steps[i]/opt_distance)    # Normalize OPT DISTANCE => LENGTH OF EDGES
+                spr.append(self.agent_steps[i]/opt_distance*1000)    # Normalize OPT DISTANCE => LENGTH OF EDGES
                 if self.eval_info_enabled:
                     self.distance_map[opt_distance].append(self.agent_steps[i])
-
 
                 # Not sure about delays
                 delays.append(self.agent_steps[i])
                 self.agent_steps[i] = 0
                 self.reset_plane(plane)
+                if has_reached_target:
+                    print("Plane ", plane.id, " reach the target.")
 
         #print(reward)
     
@@ -638,10 +654,7 @@ class Routing(NetworkEnv):
     def save_paths(self):
         b = []
         for plane in self.planes:
-            temp = []
-            for route in plane.paths:
-                temp.extend(route)
-            temp.append(b)
+            b.append(plane.paths)
         return b
 
 
@@ -699,3 +712,4 @@ class Routing(NetworkEnv):
 
 # for i in range(0,2):
     # print(a.)
+

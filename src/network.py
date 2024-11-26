@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from networkx.classes.function import path_weight
 from collections import defaultdict
-
+from node2vec import Node2Vec
 
 
 class Node:
@@ -97,6 +97,7 @@ class Network:
 
         self.coordinates = coordinates  # Waypoint coordinates, oftype list of tuples
         self.node_mask = None
+        self.embeddings = None
 
 
     def build_network(self, adjacency_matrix, distance_matrix):
@@ -176,6 +177,8 @@ class Network:
             self.nodes[i].edges = sorted(
                 self.nodes[i].edges, 
                 key=lambda edge_index: self.edges[edge_index].get_other_node(i))
+            
+        #self.create_node_embeddings()
             
 
     def update_shortest_paths(self):
@@ -264,6 +267,11 @@ class Network:
             full_mask.append(node_mask)
         self.node_mask = np.array(full_mask, dtype=np.float32)
 
+    def create_node_embeddings(self):
+        nodetovec = Node2Vec(self.G, dimensions=32, walk_length=50, workers=4, p=1, q=1, weight_key='weight')
+        mod = nodetovec.fit(window=10, min_count=1, batch_words=4)
+        embeddings = {node:  mod.wv[node].tolist() for node in self.G.nodes()}
+        self.embeddings = embeddings
 
 
 

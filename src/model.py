@@ -245,12 +245,14 @@ class DGN(nn.Module):
         q = self.q_net(q_input)
 
         # print(q.shape)
+        # if self.train():
+
         # print("Predicted Q_values:")
         # for i in range(5):
         #     for j in range(11):
         #         print(int(q[0,i,j]), end=" ")
         #     print("")
-        
+    
     
         return q    # is of shape (batch_size, num_agents, num_action)
         
@@ -373,9 +375,6 @@ class NetMon(nn.Module):
             # Use single iteration so that we still get the last hidden node states
             self.aggregate = AntiSymmetricConv(hidden_features, num_iters=1)
             self.aggregation_def_type = 1
-
-
-
         elif agg_type == "gconvlstm":
             pass
             # Filter size 1 => only from neighbors

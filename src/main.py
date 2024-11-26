@@ -50,11 +50,11 @@ n_planes = 10
 n_neighbors = 5 # 3 by default # np.count_nonzero(adj_mat[0,:])
 
 
-new_min = 10.0#0.1
-new_max = 50.0#1.0
+new_min = 0.1
+new_max = 1.0
 min = 135.19907434848324
 max = 4324.933341605337
-#dist_mat = ((dist_mat-min)/(max-min))*(new_max-new_min) + new_min
+# dist_mat = ((dist_mat-min)/(max-min))*(new_max-new_min) + new_min
 # b = []
 # for i in range(131):
 #     non_zero_positions = np.nonzero(adj_mat[i,:])[0]         # Returns indicies, where adj_matrix[i, :] .!= 0
@@ -100,22 +100,23 @@ n_agents, agent_obs_size, n_nodes, node_obs_size = reset_and_get_sizes(env)
 print("Agent observation size: ", agent_obs_size)
 print("Node observation size: ", node_obs_size)
 
-from node2vec import Node2Vec
-# G = nx.erdos_renyi_graph(n=100, p=0.1)
+
+# from node2vec import Node2Vec
 
 
-node2vec = Node2Vec(network.G, dimensions=64, walk_length=50, workers=4, p=1, q=1, weight_key='weight')
+# node2vec = Node2Vec(network.G, dimensions=64, walk_length=50, workers=4, p=1, q=1, weight_key='weight')
 
-mod = node2vec.fit(window=10, min_count=1, batch_words=4)
+# mod = node2vec.fit(window=10, min_count=1, batch_words=4)
 
-embeddings = {node: mod.wv[node] for node in network.G.nodes()}
+# embeddings = {node: mod.wv[node] for node in network.G.nodes()}
+# print(embeddings[1])
 
 
 
-
+# raise ValueError("a")
 netmon_dim = 128
-hidden_dim = [1024,512,256]
-netmon_enc_dim = [512,256]
+hidden_dim = [1024,1024,512]
+netmon_enc_dim = [512,256] #[512,256]
 netmon_iterations = 3
 netmon_rnn_type = "lstm"
 netmon_rnn_carryover = True
@@ -125,12 +126,31 @@ netmon_global = True
 device = 'cpu' # For now
 target_update_steps = 0     # Number of steps between target model updates (0 for smooth updates)
 tau = 0.01  # Interpolatin factor for smooth target model updates
-eval_episodes = 2 # Default 1000
-eval_episode_steps = 30 # Default = 300  - maximum number of steps per eval episode
+eval_episodes = 3 # Default 1000
+eval_episode_steps = 40 # Default = 300  - maximum number of steps per eval episode
 eval_output_detailed = True # Default
 output_node_state_aux = False # Default
 att_regularization_coeff = 0.03
 
+# Args to define
+debug_plots = False # Default to false
+step_before_train = 100 # Default 2000
+step_between_train = 1 # Default from authors 
+args = None
+epsilon = 0.6
+epsilon_decay = 0.996
+epsilon_update_freq = 100
+
+# Training params
+learning_rate = 0.001
+aux_loss_coeff = 0.00 # Default: 0.03 
+sequence_length = 5
+gamma = 0.98
+
+# Buffer settings
+seed = 1
+capacity = 2000 # Default: 200000 but that is too much for my pc
+replay_half_precision = False 
 
 # Use NetMon - init is rather long :)
 netmon = NetMon(node_obs_size,  # 'in_features' in init
@@ -143,7 +163,6 @@ netmon = NetMon(node_obs_size,  # 'in_features' in init
                 ).to(device)    # Move to device
 
 
-
 # Get observations from the environment
 summary_node_obs = torch.tensor(env.get_node_observation(), dtype=torch.float32, device=device).unsqueeze(0)
 summary_node_adj = torch.tensor(env.get_nodes_adjacency(), dtype=torch.float32, device=device).unsqueeze(0)
@@ -154,9 +173,8 @@ summary_node_agent = torch.tensor(env.get_node_agent_matrix(), dtype=torch.float
 netmon_summary = netmon.summarize(summary_node_obs, summary_node_adj, summary_node_agent)
 
 
-
-
 node_state_size = netmon.get_state_size()
+
 
 node_aux_size = 0 if env.get_node_aux() is None else len(env.get_node_aux()[0]) # = n_waypoints
 
@@ -165,16 +183,16 @@ netmon_startup_iterations = 1   # Number of MP interations after the env reset -
 env = NetMonWrapper(env, netmon, netmon_startup_iterations)
 _, agent_obs_size, _, _ = reset_and_get_sizes(env)  # Observation length
 
-print(f"Node state size: {node_state_size}")    # 256
+print(f"Node state size: {node_state_size}")        # 256
 print(f"Agent observation size: {agent_obs_size}")  # 3263
-print(f"Node auxiliary size: {node_aux_size}")  # 0
+print(f"Node auxiliary size: {node_aux_size}")      # 0
 
 
 # Below we select the model that we want to use 
 # We can choose from 'dgn', 'dqnr', 'commnet', 'dqn'
 chosen_model = "dgn"
 num_heads = 8
-num_attention_layers = 2
+num_attention_layers = 3
 if chosen_model == "dgn":
     # In_features are 'agent_obs_size'
     # 'env.action_space.n' is equal to the number of neighbors - choices, 'num_actions' in DGN definition
@@ -193,16 +211,6 @@ model_has_state = hasattr(model, "state")
 aux_model = None
 
 
-# Args to define
-debug_plots = False # Default to false
-step_before_train = 200 # Default 2000
-step_between_train = 1 # Default from authors 
-args = None
-epsilon = 0.6
-epsilon_decay = 0.996
-epsilon_update_freq = 100
-
-
 # Choosing the policy for decisions, 'env.action_space.n' is equal to the number of choice the agent can perform
 # It must be train for our purposes
 policy_type = "trained"
@@ -214,10 +222,6 @@ else:
 
 
 ### Training ###
-learning_rate = 0.001
-aux_loss_coeff = 0.00 # Default: 0.03 
-sequence_length = 1
-gamma = 0.98
 parameters = list(model.parameters()) + list(netmon.parameters())
 if node_aux_size > 0 and aux_loss_coeff > 0:
     aux_model = MLP(node_state_size, (node_state_size, node_aux_size), activation_function, activation_on_output=False)
@@ -231,9 +235,6 @@ state_len = model.get_state_len() if model_has_state else 0 # 0 for DGN
 
 
 # Init buffer
-seed = 1
-capacity = 200 # Default: 200000 but that is too much for my pc
-replay_half_precision = False 
 buff = ReplayBuffer(seed, capacity, n_agents, agent_obs_size, state_len, n_nodes, 
                     node_obs_size, node_state_size, node_aux_size, half_precision=replay_half_precision)
 
@@ -246,7 +247,7 @@ buffer_plot_last_n = 50   # Default: 5000
 
 # This is for evaluation and logging 
 log_info = defaultdict(lambda: Buffer(log_buffer_size, (1,), np.float32))
-comment = "AHA"
+comment = "_"
 if hasattr(env, "env_var"):
     comment += f"R{env.env_var.value}"
 if netmon is not None:
@@ -267,12 +268,12 @@ try:
     buffer_node_aux = 0
 
     episode_step = None
-    episode_steps = 300 # Default
+    episode_steps = 50 # Default
     current_episode = 0
     episode_done = False
     training_iteration = 0
     disable_prog = False
-    total_steps = 10000 # Default: 1e6
+    total_steps = 200 # Default: 1e6
     mini_batch_size = 10     # The number of individual experiences that are drawn from the replay buffer
 
 
@@ -616,10 +617,16 @@ finally:
 
             )
             paths_to_save = env.save_paths()
-            with open('list_of_lists.json', 'w') as file:
-                json.dump(paths_to_save, file)
-            print(json.dumps(metrics, indent = 4, sort_keys=True, default=str))
-            print(env.planes[0].paths)
+            np.save("list_lists", paths_to_save)
+            # with open('list_of_lists.json', 'w') as file:
+            #     json.dump(paths_to_save, file, indent =2)
+            # print(json.dumps(metrics, indent = 4, sort_keys=True, default=str))
+            # print(env.planes[0].paths)
+            for plane in env.planes:
+                print(plane.paths)
+
+            for key in metrics:
+                print(key, ": ", metrics[key])
 
         except Exception as e:
             traceback.print_exc()
