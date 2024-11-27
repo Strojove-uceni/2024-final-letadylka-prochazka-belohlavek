@@ -124,6 +124,7 @@ class Network:
         for i in range(self.n_nodes):
 
             non_zero_positions = np.nonzero(adjacency_matrix[i,:])[0]         # Returns indicies, where adj_matrix[i, :] .!= 0
+            #print(non_zero_positions, end=" ")
             local_neighbors = [int(k) for k in non_zero_positions]  # Create a list for the neighbors of that node - indicies of columns in the adjacency matrix
           
             # Sorting neighbors based on distance in ascending order 
@@ -171,8 +172,7 @@ class Network:
     
         This may be overexplained, but it took me a while to understand
         """
-        
-
+     
         for i in range(self.n_nodes):
             self.nodes[i].edges = sorted(
                 self.nodes[i].edges, 
@@ -230,28 +230,28 @@ class Network:
 
 
     def render(self, planes):
+        pass
+        # fig, ax = plt.subplots(figsize=(8, 6))
 
-        fig, ax = plt.subplots(figsize=(8, 6))
-
-        last = self.nodes[self.n_nodes-17:self.n_nodes]
-        node_colors = ['pink' if node in last else 'lightblue' for node in self.nodes]
+        # last = self.nodes[self.n_nodes-17:self.n_nodes]
+        # node_colors = ['pink' if node in last else 'lightblue' for node in self.nodes]
 
 
-        positions = {node: coordinates for node, coordinates in zip(self.G.nodes, self.coordinates)}
-        #nx.draw_networkx(self.G, positions, with_labels=True, node_color = "pink")
-        nx.draw_networkx_nodes(self.G, positions, node_color =node_colors)
-        nx.draw_networkx_edges(self.G, positions, edge_color='gray')
-        nx.draw_networkx_labels(self.G, positions, font_size=5, font_color='black', ax=ax)
+        # positions = {node: coordinates for node, coordinates in zip(self.G.nodes, self.coordinates)}
+        # #nx.draw_networkx(self.G, positions, with_labels=True, node_color = "pink")
+        # nx.draw_networkx_nodes(self.G, positions, node_color =node_colors)
+        # nx.draw_networkx_edges(self.G, positions, edge_color='gray')
+        # nx.draw_networkx_labels(self.G, positions, font_size=5, font_color='black', ax=ax)
         
-        for plane in planes:
-            x, y = self.nodes[plane.now].x, self.nodes[plane.now].y
-            ax.plot(x,y, marker=(3,0,0), markersize = 15, markerfacecolor = 'red', markeredgecolor='k', label=f'Plane {plane.id}')
+        # for plane in planes:
+        #     x, y = self.nodes[plane.now].x, self.nodes[plane.now].y
+        #     ax.plot(x,y, marker=(3,0,0), markersize = 15, markerfacecolor = 'red', markeredgecolor='k', label=f'Plane {plane.id}')
 
   
-        fig.canvas.draw()
-        plt.pause(5)
-        plt.ioff()
-        plt.close(fig)
+        # fig.canvas.draw()
+        # plt.pause(5)
+        # plt.ioff()
+        # plt.close(fig)
         
 
     def create_node_mask(self):
@@ -265,10 +265,12 @@ class Network:
             if num_edges < 10:  # Less than 10 neighbors
                 node_mask += [0] * (10-num_edges)
             full_mask.append(node_mask)
-        self.node_mask = np.array(full_mask, dtype=np.float32)
+        ar = np.array(full_mask, dtype=np.float32)
+        print(ar.shape)
+        self.node_mask = ar
 
     def create_node_embeddings(self):
-        nodetovec = Node2Vec(self.G, dimensions=32, walk_length=50, workers=4, p=1, q=1, weight_key='weight')
+        nodetovec = Node2Vec(self.G, dimensions=32, walk_length=80, workers=4, p=1, q=1, weight_key='weight')
         mod = nodetovec.fit(window=10, min_count=1, batch_words=4)
         embeddings = {node:  mod.wv[node].tolist() for node in self.G.nodes()}
         self.embeddings = embeddings

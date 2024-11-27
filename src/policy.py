@@ -47,6 +47,9 @@ class EpsilonGreedy:
  
             # Forward pass of the model
             q_values = self.model(obs, adj)
+            # if self.epsilon ==0:
+            #     print(q_values)
+
 
             # Squeezes first dimensino: 'batch_size' == 1
             q_values = q_values.cpu().squeeze(0).detach().numpy()
@@ -58,12 +61,15 @@ class EpsilonGreedy:
         # Epsilon greedy action selections
         random_actions = self.get_random_actions(node_mask)     # We need to mask of random choices of edges that are 'non-existing'
         random_filter = np.random.rand(actions.shape[0]) < self.epsilon
+        # print(random_filter)
         
         actions = (np.argmax(q_values, axis=-1)) * ~random_filter + random_filter*random_actions
         
 
         if (self.epsilon > 0 and self.step > self.step_before_train and self.step % self.epsilon_update_freq == 0):
+            print("Epsilon was:", self.epsilon)
             self.epsilon *= self.epsilon_decay
+            print("Epsilon is now:", self.epsilon)
             if self.epsilon < 0.01:
                 self.epsilon = 0.01
 

@@ -115,7 +115,7 @@ print("Node observation size: ", node_obs_size)
 
 # raise ValueError("a")
 netmon_dim = 128
-hidden_dim = [1024,1024,512]
+hidden_dim = [1024,512]
 netmon_enc_dim = [512,256] #[512,256]
 netmon_iterations = 3
 netmon_rnn_type = "lstm"
@@ -126,30 +126,32 @@ netmon_global = True
 device = 'cpu' # For now
 target_update_steps = 0     # Number of steps between target model updates (0 for smooth updates)
 tau = 0.01  # Interpolatin factor for smooth target model updates
-eval_episodes = 3 # Default 1000
-eval_episode_steps = 40 # Default = 300  - maximum number of steps per eval episode
+
+
+eval_episodes = 5 # Default 1000
+eval_episode_steps = 60 # Default = 300  - maximum number of steps per eval episode
 eval_output_detailed = True # Default
 output_node_state_aux = False # Default
 att_regularization_coeff = 0.03
 
 # Args to define
 debug_plots = False # Default to false
-step_before_train = 100 # Default 2000
+step_before_train = 150 # Default 2000
 step_between_train = 1 # Default from authors 
 args = None
 epsilon = 0.6
-epsilon_decay = 0.996
-epsilon_update_freq = 100
+epsilon_decay = 0.750#0.996
+epsilon_update_freq = 20
 
 # Training params
-learning_rate = 0.001
+learning_rate = 0.01
 aux_loss_coeff = 0.00 # Default: 0.03 
-sequence_length = 5
+sequence_length = 10    # TO ADJUST
 gamma = 0.98
 
 # Buffer settings
-seed = 1
-capacity = 2000 # Default: 200000 but that is too much for my pc
+seed = 14654
+capacity = 5000 # Default: 200000 but that is too much for my pc
 replay_half_precision = False 
 
 # Use NetMon - init is rather long :)
@@ -191,8 +193,8 @@ print(f"Node auxiliary size: {node_aux_size}")      # 0
 # Below we select the model that we want to use 
 # We can choose from 'dgn', 'dqnr', 'commnet', 'dqn'
 chosen_model = "dgn"
-num_heads = 8
-num_attention_layers = 3
+num_heads = 10
+num_attention_layers = 4
 if chosen_model == "dgn":
     # In_features are 'agent_obs_size'
     # 'env.action_space.n' is equal to the number of neighbors - choices, 'num_actions' in DGN definition
@@ -268,12 +270,12 @@ try:
     buffer_node_aux = 0
 
     episode_step = None
-    episode_steps = 50 # Default
+    episode_steps = 70 # Default
     current_episode = 0
     episode_done = False
     training_iteration = 0
     disable_prog = False
-    total_steps = 200 # Default: 1e6
+    total_steps = 350 # Default: 1e6
     mini_batch_size = 10     # The number of individual experiences that are drawn from the replay buffer
 
 
@@ -304,11 +306,11 @@ try:
         netmon_info = env.get_netmon_info()     # Returns (node_obs, node_adj, node_agent_mat)
         if hasattr(env, "get_node_aux"):
             buffer_node_aux = env.get_node_aux()
-       
+        
         # Get actions based on policy and execute step in environment (This changes model states)
         joint_actions = policy(obs, adj)
         next_obs, next_adj, reward, done, info = env.step(joint_actions)    # Perform step within the environment
-    
+
 
         # Remember state for the buffer, update state afterwards
         if model_has_state:
@@ -426,7 +428,7 @@ try:
         model.train()   # Set the model into the training mode
         netmon.train()  # Set the model into the training mode
 
-  
+
         for t, batch in enumerate(buff.get_batch(mini_batch_size, device=device, sequence_length=sequence_length)):
 
             if model_has_state and t == 0:
@@ -466,7 +468,9 @@ try:
             new_node_mask = torch.tensor(env.network.node_mask[env.new_node_plane_ids,:], dtype = torch.float32, device = device)
 
             q_values = model(batch.obs, batch.adj)  # Estimate the expected reward for each possible action
+
             q_values = q_values * old_node_mask # Multiply by old node_mask
+
             
             # Run target module
             with torch.no_grad():
@@ -480,7 +484,6 @@ try:
                 next_q = model_tar(batch.next_obs, batch.next_adj)
                 next_q = next_q * new_node_mask
                 next_q_max = next_q.max(dim=2)[0]
-
 
             if model_has_state:
                 # If the next step belongs to a new episode we mask agent state
@@ -584,8 +587,6 @@ try:
 
         # print("Succesfull")
         # raise Exception("Terminating the program.")   
-    
-
 
 except Exception as e:
     exception_training = e
@@ -617,7 +618,7 @@ finally:
 
             )
             paths_to_save = env.save_paths()
-            np.save("list_lists", paths_to_save)
+            #np.save("list_lists", paths_to_save)
             # with open('list_of_lists.json', 'w') as file:
             #     json.dump(paths_to_save, file, indent =2)
             # print(json.dumps(metrics, indent = 4, sort_keys=True, default=str))
@@ -650,7 +651,6 @@ if exception_training is not None or exception_evaluation is not None:
 
     
     raise SystemExit(f"An exception was raised during {str_ex} (see above).")
-
 
 
 
