@@ -1,0 +1,62 @@
+# config.yaml
+
+base:
+  n_planes: 10
+  n_neighbors: 3
+  env_var: 2
+  activ_f: "leaky_relu"   # leaky_relu
+
+netmon:
+  dim: 128
+  enc_dim: [1024, 512]
+  iterations: 3
+  rnn_type: "lstm"
+  rnn_carryover: true
+  agg_type: "gcn"  # Options: "gcn", "graphsage"
+  neighbor: true
+  global: false
+  start_up_iters: 1 # Number of MP interations after the env reset
+
+dgn:
+  hidden_dim: [1024,512]
+  heads: 8
+  att_layers: 2
+
+device: "cpu"
+
+target_update:
+  steps: 0        # Number of steps between target model updates (0 for smooth updates)
+  tau: 0.01       # Interpolation factor for smooth target model updates
+
+evaluation:
+  episodes: 1                 # Default: 1000
+  episode_steps: 70           # Default: 300 - max steps per eval episode
+  output_detailed: true       # Default
+  output_node_state_aux: false # Default
+
+epsilon_greedy:
+  epsilon: 1.0
+  epsilon_decay: 0.850         # 0.996
+  epsilon_update_freq: 40
+
+training:
+  total_steps: 1000             # Default: 1e6
+  step_before_train: 300       # Default: 2000
+  step_between_train: 10       # Default from authors
+  args: null
+  learning_rate: 0.001
+  att_regularization_coeff: 0.03
+  aux_loss_coeff: 0.00          # Default: 0.03
+  sequence_length: 5            # To adjust
+  gamma: 0.9
+  mini_batch_size: 8 # Experiences drawn from replay buffer
+  debug_plots: false           # Default to false
+
+buffer:
+  seed: 14654
+  capacity: 2000                # Default: 200000 but too much for my PC
+  replay_half_precision: true
+
+log_buffer:
+  size: 100                     # Default: 1000
+  plot_last_n: 50               # Default: 5000
