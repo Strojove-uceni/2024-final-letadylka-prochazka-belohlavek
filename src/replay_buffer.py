@@ -27,6 +27,8 @@ TransitionBatch = namedtuple(
         "next_node_obs",
         "next_node_adj",
         "next_node_agent_matrix",
+        "mask",
+        "after_mask"
     ],
 )
 
@@ -48,6 +50,7 @@ class ReplayBuffer(object):
         observation_size,
         agent_state_size,
         n_nodes=0,
+        max_neighbors = 0,
         node_observation_size=0,
         node_state_size=0,
         node_aux_size=0,
@@ -91,6 +94,10 @@ class ReplayBuffer(object):
             assert node_observation_size >= 0 and node_state_size >= 0
 
         # Buffers for nodes
+        self.mask = create((buffer_size, n_agents, max_neighbors), dtype=np.bool_)
+        self.after_mask = create((buffer_size, n_agents, max_neighbors), dtype=np.bool_)
+
+
         self.node_state = create(
             (buffer_size, n_nodes, node_state_size), dtype=float_type
         )
@@ -156,8 +163,6 @@ class ReplayBuffer(object):
             indices = (batch_sequence_start + offset) % self.count
             yield self._get_transition_batch(indices, device)
 
-
-
     def _get_transition_batch(self, indices, device) -> TransitionBatch:
         # Convert to tensor and push to training device
         return TransitionBatch(
@@ -212,6 +217,11 @@ class ReplayBuffer(object):
             ),
             torch.tensor(self.next_node_agent_matrix[indices], dtype=torch.float32).to(
                 device, non_blocking=True
+            ),
+            # ADDED 
+            torch.tensor(self.mask[indices], dtype=torch.bool).to(device, non_blocking=True
+            ),
+            torch.tensor(self.after_mask[indices], dtype=torch.bool).to(device, non_blocking=True
             ),
         )
 
@@ -291,6 +301,8 @@ class ReplayBuffer(object):
         next_node_obs,
         next_node_adj,
         next_node_agent_matrix,
+        mask,
+        after_mask       
     ):
         # Insert values into the buffer
         self.obs[self.index] = obs
@@ -312,6 +324,9 @@ class ReplayBuffer(object):
         self.next_node_obs[self.index] = next_node_obs
         self.next_node_adj[self.index] = next_node_adj
         self.next_node_agent_matrix[self.index] = next_node_agent_matrix
+        # ADDED
+        self.mask[self.index] = mask
+        self.after_mask[self.index] = after_mask
 
         # Increase counters until we reach buffer size
         if self.count < self.buffer_size:

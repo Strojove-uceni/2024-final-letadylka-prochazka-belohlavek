@@ -43,17 +43,19 @@ class EpsilonGreedy:
 
             adj = (torch.tensor(adj, dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True))
 
-            node_mask = torch.tensor(self.extract_node_mask(), dtype=torch.float32).to(device, non_blocking=True)   # Mask for invalid q_values
+            node_mask = torch.tensor(self.extract_node_mask(), dtype=torch.bool).to(device, non_blocking=True)   # Mask for invalid q_values
  
             # Forward pass of the model
             q_values = self.model(obs, adj)
-            # if self.epsilon ==0:
-            #     print(q_values)
-
-
+            
+            node_mask = node_mask.cpu()
             # Squeezes first dimensino: 'batch_size' == 1
             q_values = q_values.cpu().squeeze(0).detach().numpy()
-            q_values[node_mask==0] = float('-inf')  # Set invalid edges to 0
+            for i in range(q_values.shape[0]):
+                if all(q_values[i,:]==0):
+                    raise ValueError("All actions are bad")
+                    
+            q_values[node_mask==0] = -1e9 # float("-inf")#-1e9  # Set invalid edges to -inf
     
             if self.enable_action_mask:
                 q_values[self.env.action_mask.nonzero()] = float("-inf")
@@ -61,9 +63,7 @@ class EpsilonGreedy:
         # Epsilon greedy action selections
         random_actions = self.get_random_actions(node_mask)     # We need to mask of random choices of edges that are 'non-existing'
         random_filter = np.random.rand(actions.shape[0]) < self.epsilon
-        # print(random_filter)
-        
-        actions = (np.argmax(q_values, axis=-1)) * ~random_filter + random_filter*random_actions
+        actions = ((np.argmax(q_values, axis=-1))) * ~random_filter + random_filter*random_actions
         
 
         if (self.epsilon > 0 and self.step > self.step_before_train and self.step % self.epsilon_update_freq == 0):
@@ -77,9 +77,9 @@ class EpsilonGreedy:
                 
 
     def eval(self):
-            # Remember old epsilon and then switch to greedy policy
-            self.eps_tmp = self.epsilon
-            self.epsilon = 0
+        # Remember old epsilon and then switch to greedy policy
+        self.eps_tmp = self.epsilon
+        self.epsilon = 0
 
     def reset(self, agents_to_reset):
         """
@@ -112,10 +112,13 @@ class EpsilonGreedy:
         actions = []
         for i in range(node_mask.shape[0]):
             valid_acts = len(node_mask[i].nonzero(as_tuple=True)[0]) # Get #of non-zero elements
-            actions.append(np.random.randint(valid_acts))
+            gen_num = np.random.randint(1,valid_acts)
+            actions.append(gen_num)
+            #print(f"Valid actions are {valid_acts} and action is {gen_num}")
+            # if gen_num == 0:
+            #     raise ValueError("Action is", 0)
         return np.array(actions)
         
-
 
 
 
@@ -169,3 +172,9 @@ class ShortestPath:
 
         return act
     
+
+
+
+
+
+
