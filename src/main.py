@@ -7,15 +7,18 @@ import torch.nn.functional as F
 import torch.optim as optim
 import copy
 import traceback
+import sys
 import json
+import random
 import networkx as nx
 import matplotlib.pyplot as plt
 from collections import defaultdict
 from tqdm import tqdm
 
 
+
 from replay_buffer import ReplayBuffer
-from model import DGN, MLP, NetMon
+from model import DGN, MLP, CommNet, NetMon
 from routing import Routing
 
 from wrapper import NetMonWrapper
@@ -37,31 +40,28 @@ import yaml
 
 
 # File path
-file_path = "data/sparse_points.json"
+file_path = "data/sparse_points_fixed.json"
 
 # Load sparse_points from the JSON file
 with open(file_path, 'r') as f:
     sparse_points = [tuple(point) for point in json.load(f)]  # Convert lists back to tuples
 
-# sparse_points = sparse_points[51:]
-
 # Some start parameters
-adj_mat = np.load("data/ad_mat.npy")
-dist_mat = np.load("data/dist_mat.npy")
+adj_mat = np.load("data/adj_mat_fixed.npy")
+dist_mat = np.load("data/dist_mat_fixed.npy")
 
 #TEST CODE 
-# dist_mat[adj_mat==0] = 0
-# min = 1000
-# for i in range(131):
-#     for j in range(131):
-#         if 0< dist_mat[i][j] < min:
-#             min = dist_mat[i][j]
-# max = np.max(dist_mat)
-
+dist_mat[adj_mat==0] = 0
+min = 1000
+for i in range(118):
+    for j in range(118):
+        if 0< dist_mat[i][j] < min:
+            min = dist_mat[i][j]
+max = np.max(dist_mat)
 
 # Normalize distance matrix
-min = 7.617381026011701
-max = 484.4574151657363
+# min = 100.17942975894164
+# max = 510.4394513364127
 new_min = 1
 new_max = 10
 dist_mat = ((dist_mat-min)/(max-min))*(new_max-new_min) + new_min
@@ -72,10 +72,58 @@ dist_mat = ((dist_mat-min)/(max-min))*(new_max-new_min) + new_min
 with open('data/config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
+
+eval_only = True
+eval_path ="/home/mobbu/Desktop/SU2/2024-final-letadylka-prochazka-belohlavek/runs/model_best.pt"
+
+
+if eval_only:
+    assert Path(eval_path).exists()
+
+    loaded_dict = torch.load(eval_path, map_location='cpu')
+    loaded_model_arg_values = loaded_dict["args"]
+    config = loaded_model_arg_values
+    config['evaluation']['episodes'] = 10
+    config['evaluation']['episode_steps'] = 100
+    print(config)
+    # loaded_model_arg_values = filter_dict(
+    #      loaded_dict["args"],
+    #     [
+    #         "model",
+    #         "hidden_dim",
+    #         "netmon_dim",
+    #         "netmon_encoder_dim",
+    #         "netmon_iterations",
+    #         "netmon_rnn_type",
+    #         "netmon_agg_type",
+    #         "netmon_global",
+    #         "activation_function",
+    #         "num_heads",
+    #         "num_attention_layers",
+    #     ],
+    # )
+
+    # print(loaded_model_arg_values)
+    # loaded_model_arg_values.update({"policy": "trained"})
+
+    # config["base"]["model_type"] = loaded_model_arg_values["model"]
+    # config["dgn"]["hidden_dim"] = loaded_model_arg_values["hidden_dim"]
+    # config["netmon"]["dim"] = loaded_model_arg_values["dim"]
+    # config["netmon"]["enc_dim"] = loaded_model_arg_values["encoder_dim"]
+    # config["netmon"]["iterations"] = loaded_model_arg_values["iterations"]
+    # config["netmon"]["rnn_type"] = loaded_model_arg_values["rnn_type"]
+    # config["netmon"]["agg_type"] = loaded_model_arg_values["agg_type"]
+    # config["netmon"]["global"] = loaded_model_arg_values["global"]
+    # config["base"]["activ_f"] = loaded_model_arg_values["activation_function"]
+    # config["dgn"]["num_heads"] = loaded_model_arg_values["num_heads"]
+    # config["dgn"]["att_layers"] = loaded_model_arg_values["num_attention_layers"]
+
+    # set_attributes(config, loaded_model_arg_values)
+
+
 # Base classes of parameters
 cbase = config['base']
 cnetmon = config['netmon']
-cdgn = config['dgn']
 device = config['device']
 ctar_update = config['target_update']
 ceval = config['evaluation']
@@ -83,6 +131,8 @@ ctraining = config['training']
 cbuffer = config['buffer']
 clog_buffer = config['log_buffer']
 ceps = config['epsilon_greedy']
+cbuffer['seed'] = random.randint(0, 2**32 - 1)
+print("seed for the buffer is: ", cbuffer['seed'])
 
 
 
@@ -100,10 +150,11 @@ activation_function = getattr(F, cbase['activ_f'])
 n_agents, agent_obs_size, n_nodes, node_obs_size = reset_and_get_sizes(env) 
 
 
+
+
 print("Sizes before netmon:")
 print("Agent observation size: ", agent_obs_size)
 print("Node observation size: ", node_obs_size)
-
 
 # Use NetMon - init is rather long :)
 netmon = NetMon(node_obs_size,  # 'in_features' in init
@@ -136,24 +187,50 @@ print(f"Agent observation size with netmon: {agent_obs_size}")  # 3263
 print(f"Node auxiliary size: {node_aux_size}")      # 0
 
 
-# Below we select the model that we want to use 
-# We can choose from 'dgn', 'dqnr', 'commnet', 'dqn'
 
 # In_features are 'agent_obs_size'
 # 'env.action_space.n' is equal to the number of neighbors - choices, 'num_actions' in DGN definition
-model = DGN(agent_obs_size, cdgn['hidden_dim'], env.action_space.n, cdgn['heads'], cdgn['att_layers'], activation_function).to(device)
+cdgn = config['dgn']
+if cbase['model_type'] == "dgn":
+    model = DGN(agent_obs_size, cdgn['hidden_dim'], env.action_space.n, cdgn['heads'], cdgn['att_layers'], activation_function, cdgn['kv_values']).to(device)
+elif cbase['model_type'] == "comm_net":
+    ccom_net = config['commnet']
+    model = CommNet(agent_obs_size, cdgn['hidden_dim'], env.action_space.n, comm_rounds=ccom_net['comm_rounds'], activation_fn=activation_function)
+else:
+    raise ValueError("Invalid model type")
+
+
+# Load paramters of model for quick evaluation
+if eval_only:
+    assert Path(eval_path).exists()
+    load_state_dict(
+        torch.load(eval_path, map_location=device),
+        model,
+        netmon,
+    )
+
 
 
 model_tar = copy.deepcopy(model).to(device)     # Create a deep copy of the current model == DGN
 model = model.to(device)
-model_has_state = False #hasattr(model, "state")
+model_has_state = hasattr(model, "state")
 aux_model = None
-# print(model_has_state)
 
 
 # Choosing the policy for decisions, 'env.action_space.n' is equal to the number of choice the agent can perform
 # It must be train for our purposes
 policy = EpsilonGreedy(env, model, env.action_space.n, epsilon=ceps['epsilon'], step_before_train=ctraining['step_before_train'], epsilon_update_freq=ceps['epsilon_update_freq'], epsilon_decay=ceps['epsilon_decay'])
+
+if eval_only:
+    model.eval()
+    netmon.eval()
+
+    print("Performing Evaluation")
+    metrics = evaluate(env, policy, ceval['episodes'], ceval['episode_steps'],
+                      True, "eval_dict", ceval['output_detailed'], ceval['output_node_state_aux']
+                      )
+    print(json.dumps(metrics, indent=4, sort_keys=True, default=str))
+    sys.exit(0)
 
 
 ### Training ###
@@ -168,14 +245,14 @@ optimizer = optim.AdamW(parameters, lr = ctraining['learning_rate']) # Adam with
 
 state_len = model.get_state_len() if model_has_state else 0 # 0 for DGN
 
-mask_size = env.network.max_neighbors   # Should be 10
+mask_size = env.network.max_neighbors
+
 # Init buffer
 buff = ReplayBuffer(cbuffer['seed'], cbuffer['capacity'], n_agents, agent_obs_size, state_len, n_nodes, mask_size,
                     node_obs_size, node_state_size, node_aux_size, half_precision=cbuffer['replay_half_precision'])
 
 # Temp log variables
 log_reward = Buffer(clog_buffer['size'], (cbase['n_planes'],), np.float32) # Init of buffer
-
 
 # This is for evaluation and logging 
 log_info = defaultdict(lambda: Buffer(clog_buffer['size'], (1,), np.float32))
@@ -184,7 +261,6 @@ if hasattr(env, "env_var"):
     comment += f"R{env.env_var.value}"
 comment += "_netmon"
 writer = SummaryWriter(comment=comment)
-
 
 # Define reward
 best_mean_reward = -float("inf")
@@ -200,12 +276,16 @@ exception_evaluation = None
 #     model = torch.nn.DataParallel(model)
 #     print(f"Using {torch.cuda.device_count()} GPUs for target model DataParallel.")
     # model_tar = torch.nn.DataParallel(model_tar)
+print(Path(writer.get_logdir()))
 
 try:
     print("Training with parameters")
+    print(
+        f"Model type: {type(model).__name__}"
+        f"{'' if not model_has_state else ' (stateful)'}"
+    )
     print(netmon_summary)
     print(env)
-    # Variables for the transition buffer
     netmon_info = next_netmon_info = (0,0,0)
     buffer_state = buffer_node_state = 0
     buffer_node_aux = 0
@@ -366,10 +446,10 @@ try:
             writer.flush()
 
             if mean_reward > best_mean_reward:
-                # torch.save(
-                #     get_state_dict(model, netmon, args.__dict__),
-                #     Path(writer.get_logdir()) / "model_best.pt",
-                # )
+                torch.save(
+                    get_state_dict(model, netmon, config),
+                    Path(writer.get_logdir()) / "model_best.pt",
+                )
                 best_mean_reward = mean_reward
 
         if (step < step_before_train or buff.count < mini_batch_size or step % step_between_train != 0):    
@@ -425,8 +505,7 @@ try:
             # Get Node masks
             q_values = model(batch.obs, batch.adj)  # Estimate the expected reward for each possible action
             
-            # q_values = q_values * batch.mask #old_node_mask # Multiply by old node_mask
-            q_values[batch.mask==0] = -1e9
+            q_values = q_values.masked_fill(batch.mask==0, -1e9)
             
 
             # Run target module
@@ -441,7 +520,7 @@ try:
                 batch.next_obs[:, :, -next_net_obs_dim:] = next_network_obs
 
                 next_q = model_tar(batch.next_obs, batch.next_adj)
-                next_q[batch.after_mask==0] = -1e9 
+                next_q = next_q.masked_fill(batch.after_mask ==0, -1e9)
                 next_q_max = next_q.max(dim=2)[0]
             
             if model_has_state:
@@ -460,18 +539,9 @@ try:
             # q_target = torch.scatter(q_target, -1, batch.action.unsqueeze(-1), chosen_action_target_q.unsqueeze(-1))
 
             q_target = chosen_action_target_q
-            # print("Q_values are of shape: ", q_values.shape)
-            # print("Batch is of shape: ", batch.action.unsqueeze(-1).shape)
-            # for line in q_values:
-            #     print(line)
-            # print(batch.action)
-            # print(torch.gather(
-            #         q_values, -1, batch.action.unsqueeze(-1)#.cuda()
-            #     ))
             q_values = torch.gather(
                     q_values, -1, batch.action.unsqueeze(-1)#.cuda()
                 ).squeeze(-1)
-            # print(q_values)
             
             # Combined value loss for each sample in the batch
             td_error = q_values - q_target
@@ -479,7 +549,6 @@ try:
 
             # Update of q-value loss
             loss_q = loss_q + torch.mean(td_error.pow(2)) / sequence_length
-            #print(loss_q)
 
 
             # The following code is for attention. We have it, but i am going to leave it within the if hassattr statement
@@ -537,7 +606,6 @@ try:
         optimizer.step()
         
 
-
         # Logs
         log_info["loss_aux"].insert(loss_aux.detach().mean().item())
         log_info["q_values"].insert(q_values.detach().mean().item())
@@ -558,16 +626,13 @@ try:
             model_tar.load_state_dict(model.state_dict())
             tqdm.write(f"Update network, train iteration {training_iteration}")
 
+        # save checkpoints
+        if step % ctraining['model_checkpoint_steps'] == 0 and writer is not None:
+            torch.save(
+                get_state_dict(model, netmon, config),
+                Path(writer.get_logdir()) / f"model_{int(step):_d}.pt",
+            )
             
-            # save checkpoints
-            # if step % args.model_checkpoint_steps == 0 and writer is not None:
-            #     torch.save(
-            #         get_state_dict(model, netmon, args.__dict__),
-            #         Path(writer.get_logdir()) / f"model_{int(step):_d}.pt",
-
-            # print("Succesfull")
-            # raise Exception("Terminating the program.")   
-            # raise ValueError("a")
 
 except Exception as e:
     exception_training = e
@@ -585,40 +650,40 @@ finally:
             if netmon is not None:
                 netmon.state = None
 
-            # Evaluate 
-            print("Performing evaluation:")
-            metrics = evaluate(
-                env, 
-                policy,
-                ceval['episodes'],
-                ceval['episode_steps'],
-                disable_prog,
-                Path(writer.get_logdir()) /"eval",
-                ceval['output_detailed'],
-                ceval['output_node_state_aux']
+            if cbase['instant_evaluation']:
+                # Evaluate 
+                print("Performing evaluation:")
+                metrics = evaluate(
+                    env, 
+                    policy,
+                    ceval['episodes'],
+                    ceval['episode_steps'],
+                    disable_prog,
+                    Path(writer.get_logdir()) /"eval",
+                    ceval['output_detailed'],
+                    ceval['output_node_state_aux']
+                )                
+                paths_to_save = env.save_paths()
+                print(json.dumps(metrics, indent = 4, sort_keys=True, default=str))
 
-            )
-            
-            paths_to_save = env.save_paths()
-          
-            # print(json.dumps(metrics, indent = 4, sort_keys=True, default=str))
-            # print(env.planes[0].paths)
-            for plane in env.planes:
-                print(plane.paths)
+                for plane in env.planes:
+                    print(plane.paths)
 
-            for key in metrics:
-                print(key, ": ", metrics[key])
-            
-            # env.plot_trajectory()
-            #env.animation()
-            # env.animation_2()
+
+                # for key in metrics:
+                #     print(key, ": ", metrics[key])
+                
+                # env.plot_trajectory()
+                #env.animation()
+                # env.animation_2()
+                env.animation_3()
 
         except Exception as e:
             traceback.print_exc()
             exception_evaluation = e
         finally:
 
-            torch.save(get_state_dict(model, netmon, "args"),
+            torch.save(get_state_dict(model, netmon, config),
                 Path(writer.get_logdir()) / "model_last.pt")
             writer.flush()
             writer.close()

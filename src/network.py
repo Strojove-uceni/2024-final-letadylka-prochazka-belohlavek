@@ -99,6 +99,34 @@ class Network:
         self.embeddings = None
         self.max_neighbors = 0
 
+    # def update_adj(self):
+    #     self.adj_mat[89, 52] = 1
+    #     self.adj_mat[52, 89] = 1
+
+    #     self.adj_mat[33, 62] = 1
+    #     self.adj_mat[62, 33] = 1
+
+    #     self.adj_mat[104, 62] = 1
+    #     self.adj_mat[62, 104] = 1
+
+    #     self.adj_mat[110, 55] = 1
+    #     self.adj_mat[55, 110] = 1
+
+    #     self.adj_mat[30, 44] = 1
+    #     self.adj_mat[44, 30] = 1
+
+    #     self.adj_mat[27, 25] = 1
+    #     self.adj_mat[25, 27] = 1
+
+    #     self.adj_mat[45, 41] = 1
+    #     self.adj_mat[41, 45] =1
+
+    #     self.adj_mat[96,115] = 1
+    #     self.adj_mat[115, 96] = 1
+
+    #     self.adj_mat[33,54] = 1
+    #     self.adj_mat[54,33] = 1
+
 
     def build_network(self, adjacency_matrix, distance_matrix):
         """
@@ -117,6 +145,8 @@ class Network:
             new_waypoint = Node(xy[0], xy[1])   # Create a waypoint with calculated x,y coordinates
             self.nodes.append(new_waypoint)
             self.G.add_node(i, pos = (new_waypoint.x, new_waypoint.y))      # Add a node to the graph
+
+        
 
         # Create edges and neighbors for each node
         for i in range(self.n_nodes):
@@ -210,10 +240,16 @@ class Network:
         """
         Basically initialize the network.
         """
+
         self.build_network(adjacency_matrix, distance_matrix)   # Build the network
         self.update_shortest_paths()    # Update the paths
         self.update_nodes_adjacency()   # Update node adjacency
         self.create_node_mask()         # Create node mask for policy
+
+        # for i in range(118):
+        #     print(len(self.nodes[i].neighbors) == len(self.node_mask[i].nonzero()[0]))
+
+
 
     def get_nodes_adjacency(self):
         """
@@ -228,25 +264,25 @@ class Network:
                 self.adj_mat[i, neighbor] = 1
 
     def render(self):
-        pass
-        # fig, ax = plt.subplots(figsize=(8, 6))
+        # pass
+        fig, ax = plt.subplots(figsize=(8, 6))
 
-        # last = self.nodes[self.n_nodes-17:self.n_nodes]
-        # node_colors = ['pink' if node in last else 'lightblue' for node in self.nodes]
+        last = self.nodes[self.n_nodes-17:self.n_nodes]
+        node_colors = ['pink' if node in last else 'lightblue' for node in self.nodes]
 
 
-        # positions = {node: coordinates for node, coordinates in zip(self.G.nodes, self.coordinates)}
-        # #nx.draw_networkx(self.G, positions, with_labels=True, node_color = "pink")
-        # nx.draw_networkx_nodes(self.G, positions, node_color =node_colors)
-        # nx.draw_networkx_edges(self.G, positions, edge_color='gray')
-        # nx.draw_networkx_labels(self.G, positions, font_size=5, font_color='black', ax=ax)
+        positions = {node: coordinates for node, coordinates in zip(self.G.nodes, self.coordinates)}
+        #nx.draw_networkx(self.G, positions, with_labels=True, node_color = "pink")
+        nx.draw_networkx_nodes(self.G, positions, node_color =node_colors)
+        nx.draw_networkx_edges(self.G, positions, edge_color='gray')
+        nx.draw_networkx_labels(self.G, positions, font_size=5, font_color='black', ax=ax)
         
         # for plane in planes:
         #     x, y = self.nodes[plane.now].x, self.nodes[plane.now].y
         #     ax.plot(x,y, marker=(3,0,0), markersize = 15, markerfacecolor = 'red', markeredgecolor='k', label=f'Plane {plane.id}')
 
-  
-        # fig.canvas.draw()
+        plt.show()
+        fig.canvas.draw()
         # plt.pause(5)
         # plt.ioff()
         # plt.close(fig)

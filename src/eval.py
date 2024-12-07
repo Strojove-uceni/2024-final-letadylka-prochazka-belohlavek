@@ -76,7 +76,8 @@ def evaluate(
                     node_state = np.zeros((obs.shape[0], 1))
             else:
                 node_state = np.zeros((obs.shape[0], 1))
-
+            
+            
             if output_node_state_aux:
                 node_aux = env.get_node_aux()
             else:
@@ -114,6 +115,7 @@ def evaluate(
 
             obs = next_obs
             adj = next_adj
+        env.animation_3()
 
         if isinstance(env.get(), Routing):
             aux_stats["distance_map"] = env.distance_map.copy()
@@ -294,7 +296,7 @@ def create_routing_plots(
             d["reward"][step.n].append(np.mean(step.reward))
             d["feature_std"][step.n].append(np.std(step.node_state, axis=0))
             d["feature_mean"][step.n].append(np.mean(step.node_state, axis=0))
-            #d["dropped"][step.n].append(step.info["dropped"])
+            d["dropped"][step.n].append(step.info["dropped"])
             d["throughput"][step.n].append(step.info["throughput"])
             d["blocked"][step.n].append(step.info["blocked"])
             d["total_edge_load"][step.n].append(step.info["total_edge_load"])
@@ -418,7 +420,7 @@ def create_routing_plots(
         "plane_distance_delta", "Distance delta", output_dir / "distance_delta.png"
     )
     plot_attribute("looped", "Looped", output_dir / "looped.png")
-    #plot_attribute("dropped", "Dropped", output_dir / "dropped.png")
+    plot_attribute("dropped", "Dropped", output_dir / "dropped.png")
 
     # plot plane size to action..plot
     for action in d["action_to_plane_size"]:
@@ -458,7 +460,7 @@ def create_routing_plots(
                     "delays_arrived_mean",
                     "looped",
                     "reward",
-                    #"dropped",
+                    "dropped",
                     "episode_done_agents",
                 ]
             },

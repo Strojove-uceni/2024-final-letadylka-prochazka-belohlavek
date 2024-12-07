@@ -20,7 +20,13 @@ def interpolate_model(a: nn.Module, b: nn.Module, a_weight: float, target: nn.Mo
         # store interpolation results in a_dict
         a_dict[key] = a_weight * a_dict[key] + (1 - a_weight) * b_dict[key]
 
-    target.load_state_dict(a_dict)
+    # target.load_state_dict(a_dict)
+
+    # Load into target
+    if isinstance(target, nn.DataParallel):
+        target.module.load_state_dict(a_dict)
+    else:
+        target.load_state_dict(a_dict)
 
 
 def get_state_dict(model, netmon, args):
@@ -45,11 +51,19 @@ def load_state_dict(state_dict, model, netmon):
         if netmon is None:
             raise ValueError("Model uses NetMon which has not been initialized.")
         else:
-            netmon.load_state_dict(state_dict["netmon_state_dict"])
+            #print(state_dict['netmon_state_dict'].keys())
+            if isinstance(netmon, nn.DataParallel):
+                netmon.module.load_state_dict(state_dict["netmon_state_dict"])
+            else:
+                netmon.load_state_dict(state_dict["netmon_state_dict"])
     elif netmon is not None:
         raise ValueError("NetMon state could not be found.")
 
-    model.load_state_dict(state_dict["state_dict"])
+    
+    if isinstance(model, nn.DataParallel):
+        model.module.load_state_dict(state_dict["state_dict"])
+    else:
+        model.load_state_dict(state_dict["state_dict"])
 
 
 def set_attributes(obj, key_value_dict, verbose=False):
@@ -68,7 +82,20 @@ def set_attributes(obj, key_value_dict, verbose=False):
 
 
 def filter_dict(dict, keys):
-    return {key: dict[key] for key in keys}
+    # return {key: dict[key] for key in keys}
+    to_ret = {}
+    to_ret["model"] = dict['base']['model_type']
+    to_ret["hidden_dim"] = dict['dgn']['hidden_dim']
+    to_ret["dim"] = dict['netmon']['dim']
+    to_ret["encoder_dim"] = dict['netmon']['enc_dim']
+    to_ret["iterations"] = dict['netmon']['iterations']
+    to_ret["rnn_type"] = dict['netmon']['rnn_type']
+    to_ret["agg_type"] = dict['netmon']['agg_type']
+    to_ret["global"] = dict['netmon']['global']
+    to_ret["activation_function"] = dict['base']['activ_f']
+    to_ret["num_heads"] = dict['dgn']['heads']
+    to_ret["num_attention_layers"] = dict['dgn']['att_layers']  
+    return to_ret
 
 
 def one_hot_list(i, max_indices):
@@ -76,7 +103,6 @@ def one_hot_list(i, max_indices):
     if i >= 0:
         a[i] = 1
     return a
-
 
 def set_seed(seed):
     """

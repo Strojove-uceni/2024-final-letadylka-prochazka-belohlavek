@@ -197,18 +197,44 @@ class Q_Net(nn.Module):
     def __init__(self, in_features, actions):
         super(Q_Net, self).__init__()
         
-        self.fc = MLP(in_features, (1024,512,actions), None, False)#nn.Linear(in_features, actions)
+        print("In features are: ", in_features)
+        self.fc = MLP(in_features, (256,actions), None, False)#nn.Linear(in_features, actions)
 
     def forward(self, x):
         return self.fc(x)
     
+class SimpleAggregation(nn.Module):
+    def __init__(self, agg: str, mask_eye: bool) -> None:
+        super().__init__()
+        self.agg = agg
+        assert self.agg == "mean" or self.agg == "sum"
+        self.mask_eye = mask_eye
+
+    def forward(self, node_features, node_adjacency):
+        if self.mask_eye:
+            node_adjacency = node_adjacency * ~(
+                torch.eye(
+                    node_adjacency.shape[1],
+                    node_adjacency.shape[1],
+                    device=node_adjacency.device,
+                )
+                .repeat(node_adjacency.shape[0], 1, 1)
+                .bool()
+            )
+        feature_sum = torch.bmm(node_adjacency, node_features)
+        if self.agg == "sum":
+            return feature_sum
+        if self.agg == "mean":
+            num_neighbors = torch.clamp(node_adjacency.sum(dim=-1), min=1).unsqueeze(-1)
+            return feature_sum / num_neighbors
+
 
 class DGN(nn.Module):
     """
     
     """
 
-    def __init__(self, in_features, mlp_units, num_actions, num_heads, num_attention_layers, activation_fn):
+    def __init__(self, in_features, mlp_units, num_actions, num_heads, num_attention_layers, activation_fn, kv_values):
         super(DGN, self).__init__()
         
         self.encoder = MLP(in_features, mlp_units, activation_fn)
@@ -220,7 +246,7 @@ class DGN(nn.Module):
 
         for _ in range(num_attention_layers):
             self.att_layers.append(
-                AttModel(hidden_features, 16, 16, hidden_features, num_heads, activation_fn, activation_fn) 
+                AttModel(hidden_features, kv_values, kv_values, hidden_features, num_heads, activation_fn, activation_fn) 
                                    )
         
         self.q_net = Q_Net(hidden_features * (num_attention_layers + 1), num_actions)
@@ -342,7 +368,7 @@ class NetMon(nn.Module):
             
             self.jk = jk_max
 
-        elif agg_type in ["graphdsage", "adgn"]:
+        elif agg_type in ["graphsage", "adgn"]:
 
             def jk(xs):
                 return (xs[-1], xs[-2])  # No explicit jumping knowledge method is applied - we simply return the last two hidden states
@@ -351,9 +377,10 @@ class NetMon(nn.Module):
 
 
         # Now we will resolve the actual aggregation with the individual networks
-        if agg_type == "sum":
-            pass
-        if agg_type == "gcn":
+        if agg_type == "sum" or agg_type == "mean":
+            self.aggregate = SimpleAggregation(agg=agg_type, mask_eye=False)
+            self.aggregation_def_type = 0
+        elif agg_type == "gcn":
             self.aggregate = GCNConv(hidden_features, hidden_features, improved=True)
             self.aggregation_def_type = 1
         elif agg_type == "sage":
@@ -456,10 +483,7 @@ class NetMon(nn.Module):
         if no_agent_mapping: 
             return h
 
-        state = NetMon.output_to_network_obs(h, node_agent_matrix) 
-        # print(state.shape)
-        # raise ValueError("a")
-        return state
+        return NetMon.output_to_network_obs(h, node_agent_matrix)
 
 
     def get_state_size(self):
@@ -651,10 +675,7 @@ class NetMon(nn.Module):
         """
 
         if self.state.numel() == 0:
-            # print("TRUE")
             return
-        
-        #print(self.state.shape)
 
         self.state = self.state.reshape(batch_size * n_agents, self.num_states, -1).transpose(0,1)
 
@@ -681,6 +702,8 @@ class NetMon(nn.Module):
         Netmon_out is called within the forward function. Why? It performs the mapping of the node information to agents.
             It multiplies the node outputs with node_agent_matrix to aggregate/map node outputs to agent-specific outputs.
         """
+        # print(netmon_out.shape)
+        # print(node_agent_matrix.shape)
         # bmm performs a batch matrix-matrix product of matricies stored in netmon_out.transpose(1,2) and node_agent_matrix
         return torch.bmm(netmon_out.transpose(1, 2), node_agent_matrix).transpose(1, 2)
     
@@ -719,4 +742,149 @@ class NetMon(nn.Module):
             out_features += self.hidden_features
 
         return out_features
+
+
+class DQNR(nn.Module):
+    """
+    Recurrent DQN with an lstm cell.
+    """
+
+    def __init__(self, in_features, mlp_units, num_actions, activation_fn):
+        super(DQNR, self).__init__()
+        self.encoder = MLP(in_features, mlp_units, activation_fn)
+        self.lstm = nn.LSTMCell(
+            input_size=self.encoder.out_features, hidden_size=self.encoder.out_features
+        )
+        self.state = None
+        self.q_net = Q_Net(self.encoder.out_features, num_actions)
+
+    def get_state_len(self):
+        return 2 * self.lstm.hidden_size
+
+    def _state_reshape_in(self, batch_size, n_agents):
+        """
+        Reshapes the state of shape
+            (batch_size, n_agents, self.get_state_len())
+        to shape
+            (2, batch_size * n_agents, hidden_size).
+
+        :param batch_size: the batch size
+        :param n_agents: the number of agents
+        """
+        self.state = (
+            self.state.reshape(
+                batch_size * n_agents,
+                2,
+                self.lstm.hidden_size,
+            )
+            .transpose(0, 1)
+            .contiguous()
+        )
+
+    def _state_reshape_out(self, batch_size, n_agents):
+        """
+        Reshapes the state of shape
+            (2, batch_size * n_agents, hidden_size)
+        to shape
+            (batch_size, n_agents, self.get_state_len()).
+
+        :param batch_size: the batch size
+        :param n_agents: the number of agents
+        """
+        self.state = self.state.transpose(0, 1).reshape(batch_size, n_agents, -1)
+
+    def _lstm_forward(self, x, reshape_state=True):
+        """
+        A single lstm forward pass
+
+        :param x: Cell input
+        :param reshape_state: reshape the state to and from (batch_size, n_agents, -1)
+        """
+        batch_size, n_agents, feature_dim = x.shape
+        # combine agent and batch dimension
+        x = x.view(batch_size * n_agents, -1)
+
+        if self.state is None:
+            lstm_hidden_state, lstm_cell_state = self.lstm(x)
+        else:
+            if reshape_state:
+                self._state_reshape_in(batch_size, n_agents)
+            lstm_hidden_state, lstm_cell_state = self.lstm(
+                x, (self.state[0], self.state[1])
+            )
+
+        self.state = torch.stack((lstm_hidden_state, lstm_cell_state))
+        x = lstm_hidden_state
+
+        # undo combine
+        x = x.view(batch_size, n_agents, -1)
+        if reshape_state:
+            self._state_reshape_out(batch_size, n_agents)
+
+        return x
+
+    def forward(self, x, mask):
+        h = self.encoder(x)
+        h = self._lstm_forward(h)
+        return self.q_net(h)
+
+
+class CommNet(DQNR):
+    """
+    Implementation of CommNet https://arxiv.org/abs/1605.07736 with masked communication
+    between agents.
+
+    While the hidden state is aggregated over the neighbors during communication, the
+    individual cell states stay the same. This is how IC3Net implemented CommNet
+    https://github.com/IC3Net/IC3Net. The CommNet paper does not elaborate on if and how
+    the cell states are combined.
+    """
+
+    def __init__(
+        self,
+        in_features,
+        mlp_units,
+        num_actions,
+        comm_rounds,
+        activation_fn,
+    ):
+        super().__init__(in_features, mlp_units, num_actions, activation_fn)
+        assert comm_rounds >= 0
+        self.comm_rounds = comm_rounds
+
+    def forward(self, x, mask):
+        batch_size, n_agents, feature_dim = x.shape
+        h = self.encoder(x)
+
+        # manually reshape state
+        if self.state is not None:
+            self._state_reshape_in(batch_size, n_agents)
+
+        h = self._lstm_forward(h, reshape_state=False)
+
+        # explicitly exclude self-communication from mask
+        mask = mask * ~torch.eye(n_agents, dtype=bool, device=x.device).unsqueeze(0)
+
+        for _ in range(self.comm_rounds):
+            # combine hidden state h according to mask
+            # first add up hidden states according to mask
+            #    h has dimensions (batch, agents, features)
+            #    and mask has dimensions (batch, agents, neighbors)
+            #    => we have to transpose the mask to aggregate over all neighbors
+            c = torch.bmm(h.transpose(1, 2), mask.transpose(1, 2)).transpose(1, 2)
+            # then normalize according to number of neighbors per agent
+            c = c / torch.clamp(mask.sum(dim=-1).unsqueeze(-1), min=1)
+
+            # skip connection for hidden state and communication
+            h = h + c
+            # use new hidden state
+            self.state[0] = h.view(batch_size * n_agents, -1)
+
+            # pass through forward module
+            h = self._lstm_forward(h, reshape_state=False)
+
+        # manually reshape state in the end
+        self._state_reshape_out(batch_size, n_agents)
+        return self.q_net(h)
+
 

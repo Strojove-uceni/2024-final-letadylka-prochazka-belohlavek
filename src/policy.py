@@ -34,7 +34,7 @@ class EpsilonGreedy:
 
         # Actions (length is == #of agents)
         actions = np.zeros(obs.shape[0], dtype=np.int32)
-        
+
         with torch.no_grad():
             
             device = next(self.model.parameters()).device # where the model is
@@ -47,23 +47,25 @@ class EpsilonGreedy:
  
             # Forward pass of the model
             q_values = self.model(obs, adj)
+
+            q_vals = q_values.masked_fill(node_mask==0, -1e9)
             
-            node_mask = node_mask.cpu()
-            # Squeezes first dimensino: 'batch_size' == 1
-            q_values = q_values.cpu().squeeze(0).detach().numpy()
-            for i in range(q_values.shape[0]):
-                if all(q_values[i,:]==0):
+            #node_mask = node_mask.cpu()
+            # Squeezes first dimension: 'batch_size' == 1
+            q_vals = q_vals.cpu().squeeze(0).detach().numpy()
+            for i in range(q_vals.shape[0]):
+                if all(q_vals[i,:]==0):
                     raise ValueError("All actions are bad")
                     
-            q_values[node_mask==0] = -1e9 # float("-inf")#-1e9  # Set invalid edges to -inf
+            #q_values[node_mask==0] = -1e9
     
             if self.enable_action_mask:
-                q_values[self.env.action_mask.nonzero()] = float("-inf")
+                q_vals[self.env.action_mask.nonzero()] = float("-inf")
 
         # Epsilon greedy action selections
         random_actions = self.get_random_actions(node_mask)     # We need to mask of random choices of edges that are 'non-existing'
         random_filter = np.random.rand(actions.shape[0]) < self.epsilon
-        actions = ((np.argmax(q_values, axis=-1))) * ~random_filter + random_filter*random_actions
+        actions = ((np.argmax(q_vals, axis=-1))) * ~random_filter + random_filter*random_actions
         
 
         if (self.epsilon > 0 and self.step > self.step_before_train and self.step % self.epsilon_update_freq == 0):
@@ -72,7 +74,8 @@ class EpsilonGreedy:
             print("Epsilon is now:", self.epsilon)
             if self.epsilon < 0.01:
                 self.epsilon = 0.01
-
+        
+      
         return actions
                 
 
@@ -89,7 +92,7 @@ class EpsilonGreedy:
         
         """
         if hasattr(self.model, "state") and self.model.state is not None:
-            self.model.state = self.model.state * ~torch.tensor(agents_to_reset, dtype=bool, device= self.model.state.divce).unsqueeze(-1)
+            self.model.state = self.model.state * ~torch.tensor(agents_to_reset, dtype=bool, device= self.model.state.device).unsqueeze(-1)
 
     def train(self):
         # Switch back to old eps
@@ -109,16 +112,19 @@ class EpsilonGreedy:
         """
         Generate random VALID actions for exploration.
         """
+        for i in range(self.env.network.n_nodes):
+             if not len(self.env.network.nodes[i].neighbors) == len(self.env.network.node_mask[i].nonzero()[0]):
+                 raise ValueError("")
+
         actions = []
         for i in range(node_mask.shape[0]):
             valid_acts = len(node_mask[i].nonzero(as_tuple=True)[0]) # Get #of non-zero elements
-            gen_num = np.random.randint(1,valid_acts)
+            gen_num = np.random.randint(0,valid_acts)
             actions.append(gen_num)
-            #print(f"Valid actions are {valid_acts} and action is {gen_num}")
-            # if gen_num == 0:
-            #     raise ValueError("Action is", 0)
         return np.array(actions)
         
+
+
 
 
 
@@ -172,9 +178,4 @@ class ShortestPath:
 
         return act
     
-
-
-
-
-
 
