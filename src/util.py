@@ -135,3 +135,31 @@ def dim_str_to_list(dims: str):
     if len(dims) == 0:
         return []
     return [int(item) for item in dims.split(",")]
+
+
+def update_sequence_length(step, sequence_length):
+    if step % 15000 == 0:
+        sequence_length += 2
+        print("Sequence length is: ", sequence_length)
+    return sequence_length
+
+def lr_lambda(current_step):    
+    if current_step < 40000:
+        return 1.0  # No decay during experience collection
+    elif current_step < 210000:  # 40000 + 250000
+        # Linear decay from 1.0 to 0.1 over 250,000 steps
+        return 1.0 - 0.9 * ((current_step - 40000) / 210000)
+    else:
+        return 0.1  # Minimum learning rate after decay
+    
+
+def normalize_dist_mat(dist_mat, adj_mat, new_min, new_max):
+    dist_mat[adj_mat==0] = 0
+    min = 100000
+    for i in range(dist_mat.shape[0]):
+        for j in range(dist_mat.shape[0]):
+            if 0< dist_mat[i][j] < min:
+                min = dist_mat[i][j]
+    max = np.max(dist_mat)
+    # Normalize distance matrix
+    return ((dist_mat-min)/(max-min))*(new_max-new_min) + new_min

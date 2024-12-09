@@ -17,8 +17,9 @@ from tqdm import tqdm
 
 
 
-from replay_buffer import ReplayBuffer
-from model import DGN, MLP, CommNet, NetMon
+# from replay_buffer import ReplayBuffer
+from better_bufer import ReplayBuffer
+from model import DGN, MLP, CommNet, NetMon, DQN
 from routing import Routing
 
 from wrapper import NetMonWrapper
@@ -32,8 +33,9 @@ from util import (
     get_state_dict,
     interpolate_model,
     load_state_dict,
-    set_attributes,
-    set_seed,
+    update_sequence_length,
+    lr_lambda,
+    normalize_dist_mat
 )
 from eval import evaluate
 import yaml
@@ -46,80 +48,44 @@ file_path = "data/sparse_points_fixed.json"
 with open(file_path, 'r') as f:
     sparse_points = [tuple(point) for point in json.load(f)]  # Convert lists back to tuples
 
-# Some start parameters
+# Load base matricies
 adj_mat = np.load("data/adj_mat_fixed.npy")
 dist_mat = np.load("data/dist_mat_fixed.npy")
 
-#TEST CODE 
-dist_mat[adj_mat==0] = 0
-min = 1000
-for i in range(118):
-    for j in range(118):
-        if 0< dist_mat[i][j] < min:
-            min = dist_mat[i][j]
-max = np.max(dist_mat)
-
 # Normalize distance matrix
-# min = 100.17942975894164
-# max = 510.4394513364127
 new_min = 1
 new_max = 10
-dist_mat = ((dist_mat-min)/(max-min))*(new_max-new_min) + new_min
+dist_mat = normalize_dist_mat(dist_mat, adj_mat, new_min, new_max)
 
-# raise ValueError("a")
 
 # Load config parameters from a file
 with open('data/config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
 
-eval_only = True
-eval_path ="/home/mobbu/Desktop/SU2/2024-final-letadylka-prochazka-belohlavek/runs/model_best.pt"
 
-
-if eval_only:
-    assert Path(eval_path).exists()
-
-    loaded_dict = torch.load(eval_path, map_location='cpu')
+if config['only_eval']['eval']:
+    assert Path(config['only_eval']['model_path']).exists()
+    loaded_dict = torch.load(config['only_eval']['model_path'], map_location='cpu')
     loaded_model_arg_values = loaded_dict["args"]
+    loaded_model_arg_values['only_eval'] = {}
+    loaded_model_arg_values['only_eval']['eval'] = True
+    loaded_model_arg_values['only_eval']['model_path'] = config['only_eval']['model_path']
     config = loaded_model_arg_values
     config['evaluation']['episodes'] = 10
     config['evaluation']['episode_steps'] = 100
-    print(config)
-    # loaded_model_arg_values = filter_dict(
-    #      loaded_dict["args"],
-    #     [
-    #         "model",
-    #         "hidden_dim",
-    #         "netmon_dim",
-    #         "netmon_encoder_dim",
-    #         "netmon_iterations",
-    #         "netmon_rnn_type",
-    #         "netmon_agg_type",
-    #         "netmon_global",
-    #         "activation_function",
-    #         "num_heads",
-    #         "num_attention_layers",
-    #     ],
-    # )
-
-    # print(loaded_model_arg_values)
-    # loaded_model_arg_values.update({"policy": "trained"})
-
-    # config["base"]["model_type"] = loaded_model_arg_values["model"]
-    # config["dgn"]["hidden_dim"] = loaded_model_arg_values["hidden_dim"]
-    # config["netmon"]["dim"] = loaded_model_arg_values["dim"]
-    # config["netmon"]["enc_dim"] = loaded_model_arg_values["encoder_dim"]
-    # config["netmon"]["iterations"] = loaded_model_arg_values["iterations"]
-    # config["netmon"]["rnn_type"] = loaded_model_arg_values["rnn_type"]
-    # config["netmon"]["agg_type"] = loaded_model_arg_values["agg_type"]
-    # config["netmon"]["global"] = loaded_model_arg_values["global"]
-    # config["base"]["activ_f"] = loaded_model_arg_values["activation_function"]
-    # config["dgn"]["num_heads"] = loaded_model_arg_values["num_heads"]
-    # config["dgn"]["att_layers"] = loaded_model_arg_values["num_attention_layers"]
-
-    # set_attributes(config, loaded_model_arg_values)
-
+    config['training']['mini_batch_size'] = 8
+    config['training']['sequence_length'] = 5
+    config['netmon']['iterations'] = 3
+    config['device'] = 'cpu'
+    for key in config:
+        if key == "device":
+            print(f"{key}:  {config[key]}")
+            continue
+        print(key)
+        for subkey in config[key]:
+            print(f"\t{subkey}: {config[key][subkey]}")
+    
 
 # Base classes of parameters
 cbase = config['base']
@@ -148,9 +114,6 @@ activation_function = getattr(F, cbase['activ_f'])
 
 # Dynamically resets the environment
 n_agents, agent_obs_size, n_nodes, node_obs_size = reset_and_get_sizes(env) 
-
-
-
 
 print("Sizes before netmon:")
 print("Agent observation size: ", agent_obs_size)
@@ -195,20 +158,22 @@ if cbase['model_type'] == "dgn":
     model = DGN(agent_obs_size, cdgn['hidden_dim'], env.action_space.n, cdgn['heads'], cdgn['att_layers'], activation_function, cdgn['kv_values']).to(device)
 elif cbase['model_type'] == "comm_net":
     ccom_net = config['commnet']
-    model = CommNet(agent_obs_size, cdgn['hidden_dim'], env.action_space.n, comm_rounds=ccom_net['comm_rounds'], activation_fn=activation_function)
+    model = CommNet(agent_obs_size, cdgn['hidden_dim'], env.action_space.n, comm_rounds=ccom_net['comm_rounds'], activation_fn=activation_function).to(device)
+elif cbase['model_type'] == "dqn":
+    model = DQN(agent_obs_size, cdgn['hidden_dim'], env.action_space.n, activation_function).to(device)
 else:
     raise ValueError("Invalid model type")
 
 
+# print(config)
 # Load paramters of model for quick evaluation
-if eval_only:
-    assert Path(eval_path).exists()
+if config['only_eval']['eval']:
+    assert Path(config['only_eval']['model_path']).exists()
     load_state_dict(
-        torch.load(eval_path, map_location=device),
+        torch.load(config['only_eval']['model_path'], map_location=device),
         model,
         netmon,
     )
-
 
 
 model_tar = copy.deepcopy(model).to(device)     # Create a deep copy of the current model == DGN
@@ -216,15 +181,14 @@ model = model.to(device)
 model_has_state = hasattr(model, "state")
 aux_model = None
 
-
 # Choosing the policy for decisions, 'env.action_space.n' is equal to the number of choice the agent can perform
 # It must be train for our purposes
 policy = EpsilonGreedy(env, model, env.action_space.n, epsilon=ceps['epsilon'], step_before_train=ctraining['step_before_train'], epsilon_update_freq=ceps['epsilon_update_freq'], epsilon_decay=ceps['epsilon_decay'])
 
-if eval_only:
+if config['only_eval']['eval']:
     model.eval()
     netmon.eval()
-
+    print("loaded")
     print("Performing Evaluation")
     metrics = evaluate(env, policy, ceval['episodes'], ceval['episode_steps'],
                       True, "eval_dict", ceval['output_detailed'], ceval['output_node_state_aux']
@@ -242,9 +206,9 @@ if node_aux_size > 0 and ctraining['aux_loss_coeff'] > 0:
 
 # Init optimizer for training
 optimizer = optim.AdamW(parameters, lr = ctraining['learning_rate']) # Adam with weight decay
+scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 state_len = model.get_state_len() if model_has_state else 0 # 0 for DGN
-
 mask_size = env.network.max_neighbors
 
 # Init buffer
@@ -267,15 +231,6 @@ best_mean_reward = -float("inf")
 exception_training = None
 exception_evaluation = None
 
-
-# Wrap netmon with DataParallel if multiple GPUs are available
-# if device == "cuda":
-#     print(f"Using {torch.cuda.device_count()} GPUs for NetMon DataParallel.")
-#     netmon = torch.nn.DataParallel(netmon)
-#     print(f"Using {torch.cuda.device_count()} GPUs for model DataParallel.")
-#     model = torch.nn.DataParallel(model)
-#     print(f"Using {torch.cuda.device_count()} GPUs for target model DataParallel.")
-    # model_tar = torch.nn.DataParallel(model_tar)
 print(Path(writer.get_logdir()))
 
 try:
@@ -307,11 +262,21 @@ try:
     att_regularization_coeff = ctraining['att_regularization_coeff']
     aux_loss_coeff = ctraining['aux_loss_coeff']
     target_update_steps = ctar_update['steps']
-    episode_steps = ceval['episode_steps']  # Default 
+    episode_steps = ceval['episode_steps'] 
+
+    # Beta replay
+    beta_start = 0.4
+    beta_end = 1.0
+    total_steps = ctraining['total_steps']
+
 
     # tdqm is used just so everything   looks nice
     for step in tqdm(range(1, ctraining['total_steps']+ 1), miniters= 100, dynamic_ncols = True, disable=disable_prog): # Disable disables progress bar
         
+        # Gradually increase the beta
+        beta = beta_start + step * (beta_end-beta_start) / total_steps
+        beta = round(beta, 5)
+
         model.eval()    # Set the model into evaluation state 
 
         netmon.eval()   # Set the model into evaluation state
@@ -344,7 +309,7 @@ try:
 
         mask = env.network.node_mask[env.old_node_plane_ids,:]
         after_mask = env.network.node_mask[env.new_node_plane_ids,:]
-
+        
 
         # Remember state for the buffer, update state afterwards
         if model_has_state:
@@ -359,7 +324,7 @@ try:
         episode_done = episode_step >= episode_steps
 
         # Add collected information to the replay buffer
-        buff.add(obs, 
+        buff.add(step, obs, 
                     joint_actions,
                     reward,
                     next_obs,
@@ -469,8 +434,10 @@ try:
         model.train()   # Set the model into the training mode
         netmon.train()  # Set the model into the training mode
 
+        #sequence_length = update_sequence_length(step, sequence_length)
 
-        for t, batch in enumerate(buff.get_batch(mini_batch_size, device=device, sequence_length=sequence_length)):
+        for t, (sequence_start_indices, batch, is_weights) in enumerate(buff.get_batch(mini_batch_size, device=device, sequence_length=sequence_length, beta=beta)):
+        # for t, batch in enumerate(buff.get_batch(mini_batch_size, device=device, sequence_length=sequence_length)):
             
             if model_has_state and t == 0:
                 # Load the state from the begining
@@ -489,7 +456,7 @@ try:
             if aux_model is not None:
                 # Netmon aux loss
                 aux_prediction = aux_model(netmon.state)    # Netmon.state is (1,131,256) -> prediction is of shape (131,131)
-                loss_aux = (loss_aux + torch.mean((aux_prediction - batch.node_aux)** 2)/sequence_length)
+                loss_aux = (loss_aux + torch.mean((aux_prediction - batch.node_aux)**2)/sequence_length)
 
             # Replace observation in place
             net_obs_dim = network_obs.shape[-1]     # Take last 
@@ -504,7 +471,6 @@ try:
 
             # Get Node masks
             q_values = model(batch.obs, batch.adj)  # Estimate the expected reward for each possible action
-            
             q_values = q_values.masked_fill(batch.mask==0, -1e9)
             
 
@@ -533,22 +499,23 @@ try:
             # Computes the target Q-values for the actions taken
             chosen_action_target_q = (batch.reward + (~batch.done) * gamma * next_q_max)
 
-            
-            # Original DGN loss on all actions - even unused ones. This can be adjusted so that it is DQN loss just on selected actions
-            # q_target = q_values.detach()
-            # q_target = torch.scatter(q_target, -1, batch.action.unsqueeze(-1), chosen_action_target_q.unsqueeze(-1))
 
             q_target = chosen_action_target_q
             q_values = torch.gather(
-                    q_values, -1, batch.action.unsqueeze(-1)#.cuda()
+                    q_values, -1, batch.action.unsqueeze(-1).to(device)
                 ).squeeze(-1)
             
             # Combined value loss for each sample in the batch
             td_error = q_values - q_target
+
+            is_weights_tensor = torch.tensor(is_weights, dtype=torch.float32, device=device).unsqueeze(1)
+
+            #
+            buff.update_sequence_priorities(sequence_start_indices, td_errors = td_error, sequence_length = sequence_length)
             
 
             # Update of q-value loss
-            loss_q = loss_q + torch.mean(td_error.pow(2)) / sequence_length
+            loss_q = loss_q + torch.mean(td_error.pow(2) * is_weights_tensor) / sequence_length
 
 
             # The following code is for attention. We have it, but i am going to leave it within the if hassattr statement
@@ -593,6 +560,7 @@ try:
                 kl_div = (kl_div * (~batch.done)).sum() /torch.clamp((~batch.done).sum(), min =1)
 
                 loss_att = loss_att + kl_div / sequence_length
+                #print(loss_att)
 
         # print(loss_att)
         loss = (loss_q + att_regularization_coeff * loss_att + aux_loss_coeff * loss_aux)
@@ -604,6 +572,7 @@ try:
         torch.nn.utils.clip_grad_value_(parameters, 0.5)
         torch.nn.utils.clip_grad_norm_(parameters, 1.0)
         optimizer.step()
+        scheduler.step()
         
 
         # Logs
@@ -632,12 +601,11 @@ try:
                 get_state_dict(model, netmon, config),
                 Path(writer.get_logdir()) / f"model_{int(step):_d}.pt",
             )
-            
+        
 
 except Exception as e:
+    traceback.print_exc()
     exception_training = e
-    print(exception_training)
-
 finally:
     print("Clean exit")
     del buff
@@ -670,26 +638,27 @@ finally:
                     print(plane.paths)
 
 
+                #network.render()
+
+                # raise ValueError("a")
+
                 # for key in metrics:
                 #     print(key, ": ", metrics[key])
                 
                 # env.plot_trajectory()
                 #env.animation()
                 # env.animation_2()
-                env.animation_3()
+                #env.animation_3()
 
         except Exception as e:
             traceback.print_exc()
             exception_evaluation = e
         finally:
-
             torch.save(get_state_dict(model, netmon, config),
                 Path(writer.get_logdir()) / "model_last.pt")
             writer.flush()
             writer.close()
             
-
-
 if exception_training is not None or exception_evaluation is not None:
     if exception_training is not None and exception_evaluation is not None:
         str_ex = "training and evaluation"

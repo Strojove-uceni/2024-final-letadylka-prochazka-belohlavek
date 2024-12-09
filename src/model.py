@@ -23,6 +23,7 @@ class MLP(nn.Module):
         #print("MLP units are: ", mlp_units) 
 
         self.activation = activation_fn
+        self.dropout = nn.Dropout(0.3)
 
 
         self.linear_layers = nn.ModuleList() # Storage for L layers
@@ -49,15 +50,17 @@ class MLP(nn.Module):
 
         # Inter layers
         for module in self.linear_layers[:-1]:
+            x = module(x)
             if self.activation is not None:
-                x = self.activation(module(x))
-            else:
-                x = module(x)
+                x = self.activation(x)
+            x = self.dropout(x)
+
         
         # Pass through the last layer
         x = self.linear_layers[-1](x)
         if self.activation_on_ouput:
             x = self.activation(x)
+            x = self.dropout(x)
         
         return x 
     
@@ -93,6 +96,8 @@ class AttModel(nn.Module):
         would grow too large without the scaling
         """
         self.attention_scale = 1 / (k_features **0.5)
+
+        self.dropout = nn.Dropout(0.1)
 
 
 
@@ -160,6 +165,7 @@ class AttModel(nn.Module):
         att_weights = torch.matmul(q, k.transpose(2, 3)) * self.attention_scale
         att = att_weights.masked_fill(mask==0, -1e9)
         att = F.softmax(att, dim=-1)    # Softmax is applied along the last dimension to obtain normalized attention probabilities
+        att = self.dropout(att)
 
         # Now we combine the Values with respect to the attention we just computed
         """
@@ -184,6 +190,7 @@ class AttModel(nn.Module):
         out = out.transpose(1,2).contiguous().view(batch_size, num_agents, -1) 
 
         out = self.activation(self.fc_out(out)) # Linear map into a desired feature dimension
+        out = self.dropout(out)
 
         return out, att_weights
 
@@ -198,7 +205,7 @@ class Q_Net(nn.Module):
         super(Q_Net, self).__init__()
         
         print("In features are: ", in_features)
-        self.fc = MLP(in_features, (256,actions), None, False)#nn.Linear(in_features, actions)
+        self.fc = MLP(in_features, (2048,1024,512,actions), None, False)#nn.Linear(in_features, actions)
 
     def forward(self, x):
         return self.fc(x)
@@ -241,8 +248,8 @@ class DGN(nn.Module):
         self.att_layers = nn.ModuleList()
         hidden_features = self.encoder.out_features
 
-        #print("In features of DGN: ", in_features)
-        #print("MLP units are: ", mlp_units)
+        print("In features of DGN: ", in_features)
+        print("MLP units are: ", mlp_units)
 
         for _ in range(num_attention_layers):
             self.att_layers.append(

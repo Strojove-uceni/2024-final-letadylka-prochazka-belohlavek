@@ -45,7 +45,7 @@ class NetMonWrapper:
         return np.concatenate((obs, network_obs), axis=-1), adj
 
     def step(self, actions):
-        next_obs, next_adj, reward, done, info = self.env.step(actions)     # Perform the step within an environment
+        next_obs, next_adj, reward, done, info= self.env.step(actions)     # Perform the step within an environment
         next_network_obs = self._netmon_step()      # Perform a step within the netmon class from model.py
         next_joint_obs = np.concatenate((next_obs, next_network_obs), axis=-1)      # Concatenate the results
         return next_joint_obs, next_adj, reward, done, info

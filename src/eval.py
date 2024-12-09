@@ -115,7 +115,7 @@ def evaluate(
 
             obs = next_obs
             adj = next_adj
-        env.animation_3()
+        # env.plot_trajectory()
 
         if isinstance(env.get(), Routing):
             aux_stats["distance_map"] = env.distance_map.copy()
@@ -136,10 +136,10 @@ def evaluate(
         with open(output_dir / "metrics.json", "w+") as f:
             json.dump(eval_metrics, f, indent=4, sort_keys=True, default=str)
 
-        if isinstance(env.get(), Routing):
-            create_routing_plots(
-                episode_stats, output_dir, output_detailed, output_node_state_aux
-            )
+        # if isinstance(env.get(), Routing):
+        #     create_routing_plots(
+        #         episode_stats, output_dir, output_detailed, output_node_state_aux, env
+        #     )
 
     return eval_metrics
 
@@ -198,10 +198,13 @@ def save_plane_location_graph(
     sum_planes_per_edge,
     num_steps,
     filename,
+    env
 ):
     plt.clf()
-    pos = nx.drawing.spring_layout(G, seed=1337)
-    # pos = nx.get_node_attributes(G, "pos")
+    plt.figure(figsize=(12, 8))
+    # pos = nx.drawing.spring_layout(G, seed=1337)
+    pos = {node: coord for node, coord in zip(env.network.G.nodes, env.network.coordinates)}
+    
     edge_weight = np.array([data["weight"] for n1, n2, data in G.edges(data=True)])
     nx_edges = nx.draw_networkx_edges(
         G,
@@ -223,17 +226,16 @@ def save_plane_location_graph(
         labels=dict([(i, i) for i in range(G.order())]),
     )
     plt.colorbar(nx_nodes, label="Normalized node utilization")
-    nx.draw_networkx_edge_labels(
-        G,
-        pos,
-        edge_labels=nx.get_edge_attributes(G, "weight"),
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.0, edgecolor="white"),
-    )
+    #nx.draw_networkx_edge_labels(
+        #G,
+        #pos,
+        #edge_labels=nx.get_edge_attributes(G, "weight"),
+        #bbox=dict(boxstyle="round", facecolor="white", alpha=0.0, edgecolor="white"),
+    #)
     # remove border around network
     plt.gca().axis("off")
     plt.tight_layout()
     plt.savefig(filename, bbox_inches="tight")
-
 
 def ddlist():
     """
@@ -249,6 +251,7 @@ def create_routing_plots(
     output_dir: Path,
     output_detailed,
     output_node_state_aux,
+    env
 ):
     d = defaultdict(ddlist)
 
@@ -267,7 +270,7 @@ def create_routing_plots(
                 episode.aux["sum_planes_per_node"],
                 episode.aux["sum_planes_per_edge"],
                 len(episode.steps),
-                output_dir / f"ep_{episode_i}_plane_heatmap.png",
+                output_dir / f"ep_{episode_i}_plane_heatmap.png", env
             )
 
         for k, v in episode.aux["distance_map"].items():

@@ -44,11 +44,14 @@ class EpsilonGreedy:
             adj = (torch.tensor(adj, dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True))
 
             node_mask = torch.tensor(self.extract_node_mask(), dtype=torch.bool).to(device, non_blocking=True)   # Mask for invalid q_values
+
+            last_mask = torch.tensor(self.last_node_mask(), dtype=torch.bool).to(device, non_blocking=True)   # Mask for invalid q_values
  
             # Forward pass of the model
             q_values = self.model(obs, adj)
 
             q_vals = q_values.masked_fill(node_mask==0, -1e9)
+            q_vals = q_vals.masked_fill(last_mask==0, -1e9)
             
             #node_mask = node_mask.cpu()
             # Squeezes first dimension: 'batch_size' == 1
@@ -57,7 +60,6 @@ class EpsilonGreedy:
                 if all(q_vals[i,:]==0):
                     raise ValueError("All actions are bad")
                     
-            #q_values[node_mask==0] = -1e9
     
             if self.enable_action_mask:
                 q_vals[self.env.action_mask.nonzero()] = float("-inf")
@@ -123,10 +125,18 @@ class EpsilonGreedy:
             actions.append(gen_num)
         return np.array(actions)
         
-
-
-
-
+    def last_node_mask(self):
+        """
+        
+        """
+        full_mask = []
+        for plane in self.env.planes:
+            plane_mask = [1 for i in range(self.env.network.max_neighbors)]
+            for i, edge in enumerate(self.env.network.nodes[plane.now].edges):
+                if self.env.network.edges[edge].get_other_node(plane.now) == plane.last_node:
+                    plane_mask[i] = 0
+            full_mask.append(plane_mask)
+        return np.array(full_mask, dtype= np.bool_)
 
 class ShortestPath:
     
@@ -178,4 +188,10 @@ class ShortestPath:
 
         return act
     
+
+
+
+
+
+
 

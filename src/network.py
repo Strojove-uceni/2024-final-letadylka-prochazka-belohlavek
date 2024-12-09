@@ -146,7 +146,7 @@ class Network:
             self.nodes.append(new_waypoint)
             self.G.add_node(i, pos = (new_waypoint.x, new_waypoint.y))      # Add a node to the graph
 
-        
+
 
         # Create edges and neighbors for each node
         for i in range(self.n_nodes):
@@ -183,6 +183,12 @@ class Network:
                     self.G.add_edge(new_edge.start, new_edge.end, weight=new_edge.length)       # Add the edge into the graph
                     t_edge +=1      # Increment the edge index  
 
+
+
+        # print(self.nodes[0].neighbors)
+        # print(self.nodes[10].edges)
+
+        # raise ValueError("a")
         # Find max amount of neighbors
         max_neighbors = 0
         for node in self.nodes:
@@ -268,7 +274,7 @@ class Network:
         fig, ax = plt.subplots(figsize=(8, 6))
 
         last = self.nodes[self.n_nodes-17:self.n_nodes]
-        node_colors = ['pink' if node in last else 'lightblue' for node in self.nodes]
+        node_colors = ['pink' if node not in last else 'lightblue' for node in self.nodes]
 
 
         positions = {node: coordinates for node, coordinates in zip(self.G.nodes, self.coordinates)}
