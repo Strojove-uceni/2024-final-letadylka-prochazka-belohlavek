@@ -157,15 +157,14 @@ class ReplayBuffer(object):
             indicies = [(start+offset) % self.count for start in sequence_start_indices]
             yield sequence_start_indices, self._get_transition_batch(indicies, device), is_weights
 
-    def update_sequence_priorities(self, sequence_start_indicies, td_errors, sequence_length):
-        td_errors = td_errors.detach().cpu().numpy()
-        for i, start_idx in enumerate(sequence_start_indicies):
-            # priority = np.abs([i]).max()
-            for offset in range(sequence_length):
-                if offset < len(td_errors[i]):
-                    idx = (start_idx + offset) % self.count
-                    self.priorities[idx] = max(np.abs(td_errors[i][offset]), 1e-5)
-
+    # def update_sequence_priorities(self, sequence_start_indicies, td_errors, sequence_length):
+    #     td_errors = td_errors.detach().cpu().numpy()
+    #     for i, start_idx in enumerate(sequence_start_indicies):
+    #         # priority = np.abs([i]).max()
+    #         for offset in range(sequence_length):
+    #             if offset < len(td_errors[i]):
+    #                 idx = (start_idx + offset) % self.count
+    #                 self.priorities[idx] = max(np.abs(td_errors[i][offset]), 1e-5)
 
     def update_sequence_priorities(self, sequence_start_indicies, td_errors, sequence_length):
         for i, start_idx in enumerate(sequence_start_indicies):
