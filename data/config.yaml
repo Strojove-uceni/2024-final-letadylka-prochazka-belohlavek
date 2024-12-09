@@ -11,7 +11,7 @@ base:
 netmon:
   dim: 256
   enc_dim: [1024, 512]
-  iterations: 3
+  iterations: 8
   rnn_type: "lstm"
   rnn_carryover: true
   agg_type: "sum"  # sum or gcn
