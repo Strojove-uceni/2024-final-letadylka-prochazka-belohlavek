@@ -39,7 +39,7 @@ target_update:
   tau: 0.01       # Interpolation factor for smooth target model updates
 
 evaluation:
-  episodes: 50                 # Default: 50
+  episodes: 5                 # Default: 50
   episode_steps: 250           # Default: 300 - max steps per eval episode
   output_detailed: false       # Default
   output_node_state_aux: false # Default
