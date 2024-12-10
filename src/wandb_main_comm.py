@@ -65,7 +65,7 @@ def run_with_config(config=None):
     dist_mat = normalize_dist_mat(dist_mat, adj_mat, new_min, new_max)
    
     # Load config parameters from a file
-    with open('data/config.yaml', 'r') as file:
+    with open('data/config_comm.yaml', 'r') as file:
         mconfig = yaml.safe_load(file)
 
 
