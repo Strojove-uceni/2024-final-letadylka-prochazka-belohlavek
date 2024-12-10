@@ -714,7 +714,7 @@ if __name__ == "__main__":
     }
     
     # Create the sweep first (run this on a machine with internet access)
-    sweep_id = wandb.sweep(sweep_config, project="letadla_priority_sampling2_no_commnet_TEST")
+    sweep_id = wandb.sweep(sweep_config, project="letadla_priority_sampling2_no_commnet")
     print(f"Sweep ID: {sweep_id}")
     # Run the sweep agent in offline mode
     wandb.agent(sweep_id, function=run_with_config, count=35)
