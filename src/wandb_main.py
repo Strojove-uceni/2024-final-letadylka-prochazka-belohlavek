@@ -1,3 +1,8 @@
+import os
+
+# Set WandB to offline mode
+os.environ["WANDB_MODE"] = "offline"
+
 from network import Network
 from environment import reset_and_get_sizes
 
@@ -64,7 +69,8 @@ def run_with_config(config=None):
         mconfig = yaml.safe_load(file)
 
 
-    with wandb.init(config=config):
+    # Initialize wandb in offline mode
+    with wandb.init(config=config, mode='offline'):
         config = wandb.config
         mconfig['base']['model_type'] = config.model_type
         mconfig['netmon']['agg_type'] = config.agg_type
@@ -76,6 +82,7 @@ def run_with_config(config=None):
         mconfig['training']['sequence_length'] = config.sequence_length # Length of sequence taken from the replay buffer
         mconfig['training']['gamma'] = config.gamma
         mconfig['training']['mini_batch_size'] = config.mini_batch_size
+        mconfig['netmon']['iterations'] = config.iterations
 
 
         if mconfig['only_eval']['eval']:
@@ -568,7 +575,6 @@ def run_with_config(config=None):
                             - first transpose results in (n_agents_source, batch_size, heads, num_layers, n_agents_dest)
                             - second one results in (batch_size, n_agents_source, heads, num_layers, n_agents_dest)
                             - then we reduce with sum to (batch_size, n_agents_source, ...)
-
                         """
                         kl_div = kl_div.transpose(0, -2).transpose(0,1).sum(dim=(-1,-2,-3))
                         
@@ -579,7 +585,7 @@ def run_with_config(config=None):
                         loss_att = loss_att + kl_div / sequence_length
                         #print(loss_att)
 
-                # print(loss_att)
+                    # print(loss_att)
                 loss = (loss_q + att_regularization_coeff * loss_att + aux_loss_coeff * loss_aux)
                 optimizer.zero_grad()
                 loss.backward()
@@ -629,7 +635,7 @@ def run_with_config(config=None):
                         get_state_dict(model, netmon, mconfig),
                             Path(writer.get_logdir()) / f"model_{int(step):_d}.pt",
                         )
-                
+
 
         except Exception as e:
             traceback.print_exc()
@@ -676,7 +682,6 @@ def run_with_config(config=None):
                     writer.close()
                     
 
-
         if exception_training is not None or exception_evaluation is not None:
             if exception_training is not None and exception_evaluation is not None:
                 str_ex = "training and evaluation"
@@ -693,19 +698,23 @@ if __name__ == "__main__":
     "method": "random",
     "metric": {"name": "reward", "goal": "maximize"},
     "parameters": {
-        "model_type": {"values": ["dgn", "dqn", "comm_net"]},
+        "model_type": {"values": ["dgn", "dqn"]},
         "agg_type": {"values": ["sum", "gcn"]},
-        "att_regularization_coeff": {"values": [0.03, 0.05]},
-        "num_heads": {"values": [6,8]},
-        "num_attention_layers": {"values": [4, 6]},
+        "att_regularization_coeff": {"values": [0.03]},
+        "num_heads": {"values": [6,8,12]},
+        "num_attention_layers": {"values": [6, 8]},
         "step_between_train": {"values": [5,10]},
         "epsilon_decay": {"min": 0.95, "max": 0.996},
-        "epsilon_update_freq": {"values": [80,100]},
+        "epsilon_update_freq": {"values": [70,90]},
         "sequence_length": {"values": [16]},
         "gamma": {"min": 0.9, "max": 0.99},
-        "mini_batch_size": {"values": [16, 32, 64]}
+        "mini_batch_size": {"values": [16, 32]},
+        "iterations": {"values": [8,12]}
         }
     }
-
-    sweep_id = wandb.sweep(sweep_config, project="letadla_priority_sampling2")
-    wandb.agent(sweep_id, function=run_with_config, count=100)
+    
+    # Create the sweep first (run this on a machine with internet access)
+    sweep_id = wandb.sweep(sweep_config, project="letadla_priority_sampling2_no_commnet")
+    print(f"Sweep ID: {sweep_id}")
+    # Run the sweep agent in offline mode
+    wandb.agent(sweep_id, function=run_with_config, count=35)
