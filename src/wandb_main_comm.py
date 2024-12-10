@@ -1,7 +1,5 @@
 import os
 
-# Set WandB to offline mode
-os.environ["WANDB_MODE"] = "offline"
 
 from network import Network
 from environment import reset_and_get_sizes
