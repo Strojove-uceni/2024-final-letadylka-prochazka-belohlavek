@@ -6,7 +6,7 @@ base:
   env_var: 2
   activ_f: "leaky_relu"   # leaky_relu
   model_type: "dgn" # comm_net
-  instant_evaluation: true
+  instant_evaluation: false
   
 netmon:
   dim: 256
@@ -50,8 +50,8 @@ epsilon_greedy:
   epsilon_update_freq: 100
 
 training:
-  total_steps: 150000             # Default: 1e6
-  step_before_train: 20000       # Default: 2000
+  total_steps: 75000             # Default: 1e6
+  step_before_train: 15000       # Default: 2000
   step_between_train: 10       # Default from authors
   args: null
   learning_rate: 0.001
