@@ -4,18 +4,19 @@
 **We advise to download the code and run this project locally to enjoy the animation at the end. Moreover, one can pleasantly move within the configuraion file.**
 
 ## About
-This project concerns itself with the application of Multi-Agent Reinforcement Learning for automatic routing of planes. We build on the implementation of authors [] and adapt and modify their code to suit our needs. The architecture of this beast comprises of Graph Convolutional Networks, Recurrent Neural Networks and other beautiful machine learning structures. These components are combined to create outputs that almost look like magic, all while employing an extremely thought-out process. 
+This project concerns itself with the application of Multi-Agent Reinforcement Learning for automatic routing of planes. We build on the implementation of authors (view References) and adapted and modified their code to suit our needs. The architecture of this beast comprises of Graph Convolutional Networks, Recurrent Neural Networks and other beautiful machine learning structures. These components are combined to create outputs that almost look like magic, all while employing an extremely thought-out process. 
 
 ## How to run the project
-Description on how to run the project can be found ...
+Description on how to run the project can be found in the demo notebook, along with a quick demonstration.
 
 ## Our contributions
 Our contributions mainly consist of the following
-    - adaptation to traffic air control for efficient routing of planes
-    - stateless version of the NetMon class -> the training can be split across multiple gpus
+    - adaptation to air traffic control for efficient routing
+    - state-less version of the NetMon class -> the training can be split across multiple gpus
     - generalization to variable neighbourhoods
     - addition of prioritized replay buffer
     - addition of regularization as we deal with higher dimensional data, consequently using more layers within our models
+    - augmented the structure to support dynamic environment
 
 ## Available models to try out
 ### Q-value prediction
