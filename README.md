@@ -27,6 +27,9 @@ Our contributions mainly consist of the following
   - SUM = simple sum
 Further description of these methods can be found within description file.
 
+## Multi-GPU support
+We have provided code for multi-GPU support for the NetMon class created by the authors. We have used simple DataParallel python structure for a split across mulitple GPUs within a single compute node. Additionally, we have modified the code to support distribution of the Q-value predictor and the NetMon class between 2 GPUs, therefore allowing for slightly bigger models. 
+
 ### References
 
 
