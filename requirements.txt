@@ -1,0 +1,1 @@
+/home/mobbu/Desktop/SU2/2024-final-letadylka-prochazka-belohlavek/env/requirements.txt
