@@ -14,7 +14,6 @@ class NetMonWrapper:
         self.netmon = netmon    # This is the netmon class from model.py
         self.device = next(netmon.parameters()).device  
         self.device_main = device_main
-
         self.node_obs = None
         self.node_adj = None
         self.node_agent_matrix = None
