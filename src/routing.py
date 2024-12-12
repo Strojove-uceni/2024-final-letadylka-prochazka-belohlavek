@@ -58,7 +58,6 @@ class Plane:
         self.speed = speed
         self.shortest_path_weight = shortest_path_weight
         self.visited_nodes = set([start])
-        self.trajectory = []
         self.last_node = -1
         self.targets.append(target)
     
@@ -417,11 +416,6 @@ class Routing(NetworkEnv):
         if self.eval_info_enabled:
             for i in range(self.n_planes):
                 plane = self.planes[i]
-                if plane.edge != -1:
-                    plane.paths[plane.run].append(-1*plane.edge)    # Add node to plane path
-                else:
-                    plane.paths[plane.run].append(plane.now)               # Add node to plane path
-
 
         # Planes are shuffled to not prefer planes with lower ids
         random_plane_order = np.arange(self.n_planes)
@@ -572,6 +566,7 @@ class Routing(NetworkEnv):
                 
                 # Insert delays before resetting planes
                 if success[i]:
+                    plane.trajectory.append(plane.now)
                     delays_arrived.append(self.agent_steps[i])
                     spr_ratio = self.agent_steps[i]/opt_distance*plane.speed
                     spr.append(spr_ratio)
@@ -660,7 +655,9 @@ class Routing(NetworkEnv):
         from matplotlib.patches import Circle
 
         def get_angle(start_pos, end_pos):
-            """Calculate the angle in degrees from start_pos to end_pos."""
+            """
+                Calculate the angle in degrees from start_pos to end_pos.
+            """
             delta_x = end_pos[0] - start_pos[0]
             delta_y = end_pos[1] - start_pos[1]
             angle = np.degrees(np.arctan2(delta_y, delta_x))  # Adjust based on symbol orientation
@@ -688,7 +685,7 @@ class Routing(NetworkEnv):
             114: "Rome",
             106: "Sarajevo"
         }
-        
+        print(self.planes[0].trajectory)
         planes_colors = {plane: f"C{i}" for i, plane in enumerate(self.planes)}
         
         pos = {node: coord for node, coord in zip(self.network.G.nodes, self.network.coordinates)}
@@ -716,12 +713,10 @@ class Routing(NetworkEnv):
         legend_lines = [ax.plot([], [], color=color, label=f'Plane: {plane.id}', linewidth=1)[0] for plane, color in planes_colors.items()]
         
         ax.legend()
-        active_booms = []
-        # ADDED
-        # Create a list to hold the annotation boxes for planes
-        plane_annotations = {plane: None for plane in self.planes}  
+
+        # Create a list to hold the annotation boxes for planes 
         plane_texts = {plane: None for plane in self.planes}
-        targets_reached = [0 for _ in range(self.n_planes)]
+        # targets_reached = [0 for _ in range(self.n_planes)]
 
         def update_trajectory_render(frame):
             ax.clear()
@@ -764,18 +759,6 @@ class Routing(NetworkEnv):
                     # rotation_mode='anchor'
                     )
 
-                    if plane.trajectory[frame] == plane.targets[targets_reached[i]]:
-                        targets_reached[i] += 1
-                        # Add a new boom effect at this position
-                        boom = {
-                            'position': (end_pos[0],end_pos[1]),
-                            'radius': 0.0,
-                            'max_radius': 0.3,  # Adjust for size of the boom
-                            'color': 'yellow',
-                            'alpha': 1.0
-                        }
-                        active_booms.append(boom)
-
 
                 
                 for i, edge in enumerate(planes_trajectories[plane]):
@@ -786,25 +769,6 @@ class Routing(NetworkEnv):
                 if frame < len(plane.trajectory):
                     current_node = plane.trajectory[frame]
                     nx.draw_networkx_nodes(self.network.G, pos, nodelist=[current_node], node_color=color, ax=ax,node_size=1)
-
-                # Update and draw boom effects
-                booms_to_remove = []
-                for boom in active_booms:
-                    # Create a Circle patch
-                    circle = Circle(boom['position'], boom['radius'], color=boom['color'], alpha=boom['alpha'], fill=True, linewidth=0)
-                    ax.add_patch(circle)
-                    
-                    # Update boom properties
-                    boom['radius'] += 300  # Expansion speed
-                    boom['alpha'] -= 0.02    # Fade speed
-                    
-                    # Remove booms that have reached max radius or are fully transparent
-                    if boom['radius'] > boom['max_radius'] or boom['alpha'] <= 0:
-                        booms_to_remove.append(boom)
-                
-                # Remove finished booms
-                for boom in booms_to_remove:
-                    active_booms.remove(boom)
                 
             return list(plane_texts.values())
         
@@ -827,248 +791,3 @@ class Routing(NetworkEnv):
             > Action mask: {self.enable_action_mask}\
             """
         )
-
-    def animation_2(self):
-            
-            """ Plots the trajectory of each plane """
-            
-            special_nodes = [114, 115, 116, 91, 23, 79, 18, 12, 24, 0, 93, 71, 117, 100, 106, 88, 27]
-            
-            special_labels = {
-                12: "Berlin",
-                117: "Copenhagen",
-                0: "Vienna",
-                27: "Warsaw",
-                24: "Prague",
-                71: "Budapest",
-                91: "Amsterdam",
-                18: "Munich",
-                23: "Zurich",
-                88: "Bucharest",
-                93: "Zagreb",
-                115: "Milan",
-                79: "Frankfurt",
-                116: "Brussels",
-                100: "Belgrade",
-                114: "Rome",
-                106: "Sarajevo"
-            }
-            
-            planes_colors = {plane: f"C{i}" for i, plane in enumerate(self.planes)}
-            
-            pos = {node: coord for node, coord in zip(self.network.G.nodes, self.network.coordinates)}
-            
-            fig, ax = plt.subplots(figsize=(10, 8))
-            
-            # img = mpimg.imread('c:/Users/TomasProchazka/PythonProjects/2024-final-letadylka-prochazka-belohlavek/data/MAP.png')
-            # ax.imshow(img, extent=[min(x[0] for x in pos.values()), max(x[0] for x in pos.values()), 
-            #                    min(x[1] for x in pos.values()), max(x[1] for x in pos.values())], alpha=0.3)
-            
-            planes_trajectories = {plane: [] for plane in self.planes}
-            
-            node_colors = ["#DAA520" if node in special_nodes else "grey" for node in self.network.G.nodes]
-            
-            nx.draw_networkx(self.network.G, pos, with_labels=True, node_color=node_colors, edge_color="black", ax=ax)
-            nx.draw_networkx_labels(self.network.G, pos, labels=special_labels, font_size=10, ax=ax)
-            
-            legend_lines = [ax.plot([], [], color=color, label=f'Plane: {plane.id}', linewidth=1)[0] for plane, color in planes_colors.items()]
-            
-            ax.legend()
-            
-            plane_texts = {plane: None for plane in self.planes}
-            plane_edge_pos = {plane: [self.network.nodes[plane.start].x, self.network.nodes[plane.start].y] for plane in self.planes}
-
-            node_colors = ["#DAA520" if node in special_nodes else "grey" for node in self.network.G.nodes]
-            node_size = [100 if node in special_nodes else 100 for node in self.network.G.nodes]
-            node_alpha = [1 if node in special_nodes else 0.3 for node in self.network.G.nodes]
-
-            
-            def update_trajectory_render(frame):
-                ax.clear()
-                # ax.imshow(img, extent=[min(x[0] for x in pos.values()), max(x[0] for x in pos.values()), 
-                #                min(x[1] for x in pos.values()), max(x[1] for x in pos.values())], alpha=0.3)
-                
-                nx.draw_networkx_nodes(self.network.G, pos, node_color=node_colors, ax=ax,  alpha=node_alpha, node_size=node_size)
-                nx.draw_networkx_labels(self.network.G, pos, labels=special_labels, font_size=7, ax=ax)
-                # Draw edges
-                nx.draw_networkx_edges(
-                        self.network.G,
-                        pos,
-                        edge_color="black",
-                        ax=ax,
-                        alpha=0.3,  # Uniform alpha for edges
-                        width=1
-                    )
-                
-                legend_lines = [ax.plot([], [], color=color, label=f'Plane: {plane.id}', linewidth=1)[0] for plane, color in planes_colors.items()]
-                
-                for plane in self.planes:
-                    color = planes_colors[plane]
-                    
-                    if 0 < frame < len(plane.trajectory):
-                        
-                        if plane.trajectory[frame - 1] > 0 and plane.trajectory[frame] > 0: # This if function alone is sufficient for visualisation without moving planes
-                            current_edge = plane.trajectory[frame - 1], plane.trajectory[frame]
-                            planes_trajectories[plane].append(current_edge)
-                            plane_edge_pos[plane] = [self.network.nodes[plane.trajectory[frame]].x, self.network.nodes[plane.trajectory[frame]].y]
-                            # Add new text with Unicode airplane symbol
-                            plane_texts[plane] = ax.text(
-                            plane_edge_pos[plane][0],
-                            plane_edge_pos[plane][1],
-                            '\u2708',  # Unicode airplane symbol ✈
-                            fontsize=40,  # Adjust as needed
-                            color=color,
-                            ha='center',
-                            va='center',
-                            # rotation=angle,
-                            # rotation_mode='anchor'
-                            )
-                        
-                        elif plane.trajectory[frame - 1] < 0 and plane.trajectory[frame] > 0:
-                            plane_edge_pos[plane] = [self.network.nodes[plane.trajectory[frame]].x, self.network.nodes[plane.trajectory[frame]].y]
-                            # Add new text with Unicode airplane symbol
-                            plane_texts[plane] = ax.text(
-                            plane_edge_pos[plane][0],
-                            plane_edge_pos[plane][1],
-                            '\u2708',  # Unicode airplane symbol ✈
-                            fontsize=40,  # Adjust as needed
-                            color=color,
-                            ha='center',
-                            va='center',
-                            # rotation=angle,
-                            # rotation_mode='anchor'
-                            )
-                        elif plane.trajectory[frame - 1] > 0 and plane.trajectory[frame] < 0:
-                            c_e = self.network.edges[-1 * plane.trajectory[frame]]
-                            
-                            current_edge = plane.trajectory[frame - 1], c_e.end
-                            planes_trajectories[plane].append(current_edge)
-                            
-                            start_pos = self.network.nodes[plane.trajectory[frame-1]].x, self.network.nodes[plane.trajectory[frame-1]].y
-                            end_pos = self.network.nodes[c_e.end].x, self.network.nodes[c_e.end].y
-                            
-                            plane_edge_pos[plane][0] = start_pos[0] + (end_pos[0] - start_pos[0]) /2 #self.dist_mat[plane.trajectory[frame - 1]][c_e.end]
-                            plane_edge_pos[plane][1] = start_pos[1] + (end_pos[1] - start_pos[1]) /2 #self.dist_mat[plane.trajectory[frame - 1]][c_e.end]
-                            # Add new text with Unicode airplane symbol
-                            plane_texts[plane] = ax.text(
-                            plane_edge_pos[plane][0],
-                            plane_edge_pos[plane][1],
-                            '\u2708',  # Unicode airplane symbol ✈
-                            fontsize=40,  # Adjust as needed
-                            color=color,
-                            ha='center',
-                            va='center',
-                            # rotation=angle,
-                            # rotation_mode='anchor'
-                            )
-                    
-                        elif plane.trajectory[frame - 1] < 0 and plane.trajectory[frame] < 0:
-                            c_e = self.network.edges[-1 * plane.trajectory[frame]]
-                            
-                            current_edge = c_e.start, c_e.end
-                            planes_trajectories[plane].append(current_edge)
-                            
-                            start_pos = self.network.nodes[c_e.start].x, self.network.nodes[c_e.start].y
-                            end_pos = self.network.nodes[c_e.end].x, self.network.nodes[c_e.end].y
-                            
-                            plane_edge_pos[plane][0] = start_pos[0] + (end_pos[0] - start_pos[0]) /2# (self.dist_mat[c_e.start][c_e.end] - np.sqrt(np.power(start_pos[0]-plane_edge_pos[plane][0],2) + np.power(start_pos[1] -plane_edge_pos[plane][1],2)))
-                            plane_edge_pos[plane][1] = start_pos[1] + (end_pos[1] - start_pos[1]) /2# (self.dist_mat[c_e.start][c_e.end] - np.sqrt(np.power(start_pos[0]-plane_edge_pos[plane][0],2) + np.power(start_pos[1] -plane_edge_pos[plane][1],2)))
-                            # Add new text with Unicode airplane symbol
-                            plane_texts[plane] = ax.text(
-                            plane_edge_pos[plane][0],
-                            plane_edge_pos[plane][1],
-                            '\u2708',  # Unicode airplane symbol ✈
-                            fontsize=40,  # Adjust as needed
-                            color=color,
-                            ha='center',
-                            va='center',
-                            # rotation=angle,
-                            # rotation_mode='anchor'
-                            )
-                    
-                    # nx.draw_networkx_edges(self.network.G, pos, edgelist=planes_trajectories[plane], edge_color=color, ax=ax)
-                    alpha = 0
-                    line_width = 0
-                    for i, edge in enumerate(planes_trajectories[plane]):
-                        alpha = max(0.1, 1 - (frame - i) / 50)  # Fading factor (adjust "5" for longer trails)
-                        line_width = max(1, 5 - (frame - i) / 2)  # Adjust "3" for initial width and "2" for fading speed
-                        nx.draw_networkx_edges(self.network.G, pos, edgelist=[edge], edge_color=color, alpha=alpha, width=line_width, ax=ax)
-                
-                    # if frame < len(plane.visited_nodes):
-                        # nodelist =[sorted(list(plane.visited_nodes))[frame]]
-                        # nx.draw_networkx_nodes(self.network.G, pos, nodelist=nodelist, node_color=color, ax=ax)
-                    if frame < len(plane.trajectory):
-                        if plane.trajectory[frame] > 0:
-                            current_node = plane.trajectory[frame]
-                            nx.draw_networkx_nodes(self.network.G, pos, nodelist=[current_node], node_color=color, ax=ax, node_size=1)
-                        else:
-                            c_e = self.network.edges[-1*plane.trajectory[frame]]
-                            current_edge = c_e.start, c_e.end
-                            nx.draw_networkx_edges(self.network.G, pos, edgelist=[current_edge], edge_color=color, alpha=alpha, width=line_width, ax=ax)
-
-                return list(plane_texts.values())
-                            
-            
-            num_frames = max(len(plane.trajectory) for plane in self.planes)
-            self.animation = FuncAnimation(fig, update_trajectory_render, frames=num_frames, interval=1000, repeat=False)
-            
-            # self.animation.save("planes_trajectory_animation.mp4", writer="ffmpeg") ## possibly save the animation
-            
-            plt.title("Planes Trajectory Animation")
-            plt.show()
-
-    def animation_3(self):
-        """ Plots the trajectory of each plane """
-        
-        planes_colors = {plane: f"C{i}" for i, plane in enumerate(self.planes)}
-        
-        pos = {node: coord for node, coord in zip(self.network.G.nodes, self.network.coordinates)}
-        
-        fig, ax = plt.subplots(figsize=(10, 8))
-        
-        planes_trajectories = {plane: [] for plane in self.planes}
-        
-        nx.draw_networkx(self.network.G, pos, with_labels=False, node_color="grey", edge_color="black", ax=ax, alpha=0.3)
-        
-        legend_lines = [ax.plot([], [], color=color, label=f'Plane: {plane.id}', linewidth=1)[0] for plane, color in planes_colors.items()]
-        
-        ax.legend()
-        
-        node_color = ["grey" if i < 101 else "pink" for i in range(self.network.n_nodes)]
-        node_size = [100 if i < 101 else 200 for i in range(self.network.n_nodes)]
-        node_alpha = [0.3 if i < 101 else 1 for i in range(self.network.n_nodes)]
-
-        def update_trajectory_render(frame):
-            ax.clear()
-            nx.draw_networkx(self.network.G, pos, with_labels=False, node_color=node_color, edge_color="black", ax=ax, alpha=node_alpha, node_size = node_size)
-            
-            legend_lines = [ax.plot([], [], color=color, label=f'Plane: {plane.id}', linewidth=1)[0] for plane, color in planes_colors.items()]
-            ax.legend()
-            
-            for plane in self.planes:
-                color = planes_colors[plane]
-                
-                if 0 < frame < len(plane.trajectory):
-                    current_edge = plane.trajectory[frame - 1], plane.trajectory[frame]
-                    planes_trajectories[plane].append(current_edge)
-                
-                # nx.draw_networkx_edges(self.network.G, pos, edgelist=planes_trajectories[plane], edge_color=color, ax=ax)
-                for i, edge in enumerate(planes_trajectories[plane]):
-                    alpha = max(0.1, 1 - (frame - i) / 50)  # Fading factor (adjust "5" for longer trails)
-                    line_width = max(1, 3 - (frame - i) / 2)  # Adjust "3" for initial width and "2" for fading speed
-                    nx.draw_networkx_edges(self.network.G, pos, edgelist=[edge], edge_color=color, alpha=alpha, width=line_width, ax=ax)
-            
-                # if frame < len(plane.visited_nodes):
-                    # nodelist =[sorted(list(plane.visited_nodes))[frame]]
-                    # nx.draw_networkx_nodes(self.network.G, pos, nodelist=nodelist, node_color=color, ax=ax)
-                if frame < len(plane.trajectory):
-                    current_node = plane.trajectory[frame]
-                    nx.draw_networkx_nodes(self.network.G, pos, nodelist=[current_node], node_color=color, ax=ax)
-        
-        num_frames = max(len(plane.trajectory) for plane in self.planes)
-        self.animation = FuncAnimation(fig, update_trajectory_render, frames=num_frames, interval=2000, repeat=False)
-        
-        # self.animation.save("planes_trajectory_animation.mp4", writer="ffmpeg") ## possibly save the animation
-        
-        plt.title("Planes Trajectory Animation")
-        plt.show()
