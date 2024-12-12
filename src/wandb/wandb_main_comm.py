@@ -88,11 +88,6 @@ def run_with_config(config=None):
             loaded_model_arg_values['only_eval']['eval'] = True
             loaded_model_arg_values['only_eval']['model_path'] = mconfig['only_eval']['model_path']
             mconfig = loaded_model_arg_values
-            mconfig['evaluation']['episodes'] = 10
-            mconfig['evaluation']['episode_steps'] = 100
-            mconfig['training']['mini_batch_size'] = 8
-            mconfig['training']['sequence_length'] = 5
-            mconfig['netmon']['iterations'] = 3
             mconfig['device'] = 'cpu'
             for key in mconfig:
                 if key == "device":
