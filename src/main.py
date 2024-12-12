@@ -52,7 +52,7 @@ dist_mat = normalize_dist_mat(dist_mat, adj_mat, new_min, new_max)
 
 
 # Load config parameters from a file
-with open('data/config.yaml', 'r') as file:
+with open('data/demo_config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
 if config['only_eval']['eval']:
