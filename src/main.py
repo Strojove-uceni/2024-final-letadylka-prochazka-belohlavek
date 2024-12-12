@@ -36,15 +36,15 @@ import yaml
 
 
 # File path
-file_path = "data/sparse_points_fixed.json"
+file_path = "data/waypoints.json"
 
 # Load sparse_points from the JSON file
 with open(file_path, 'r') as f:
     sparse_points = [tuple(point) for point in json.load(f)]  # Convert lists back to tuples
 
 # Load base matricies
-adj_mat = np.load("data/adj_mat_fixed.npy")
-dist_mat = np.load("data/dist_mat_fixed.npy")
+adj_mat = np.load("data/adj_mat.npy")
+dist_mat = np.load("data/dist_mat.npy")
 
 # Normalize distance matrix
 new_min = 1
