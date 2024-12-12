@@ -1,7 +1,6 @@
 from network import Network
 from environment import reset_and_get_sizes
-# from replay_buffer import ReplayBuffer
-from better_bufer import ReplayBuffer
+from replay_buffer import ReplayBuffer
 from model import DGN, MLP, CommNet, NetMon, DQN
 from routing import Routing
 from wrapper import NetMonWrapper
