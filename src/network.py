@@ -1,10 +1,7 @@
-from typing import List, Optional
 import numpy as np
-import matplotlib.pyplot as plt
 import networkx as nx
 from networkx.classes.function import path_weight
 from collections import defaultdict
-from node2vec import Node2Vec
 
 
 class Node:
@@ -37,47 +34,47 @@ class Edge:
             return self.start
         else:
             raise ValueError("Node not in edges.")
-# class Edge:
-#     """
-#     A connection between two waypoints.
-#     """
-
-#     def __init__(self, start, end, length, weather_condition) -> None:
-#         self.start = start
-#         self.end = end
-#         self.base_length = length
-#         self.weather_condition = weather_condition if weather_condition is not None else np.zeros((4,))
-#         self.length = self.get_weight()
-
-#     # Return the node index start/end
-#     def get_other_node(self, node): 
-#         if self.start == node:
-#             return self.end
-#         elif self.end == node:
-#             return self.start
-#         else:
-#             raise ValueError("Node not in edges.")
         
 
-#     def update_weather_condition(self, weather_condition: float) -> None:
-#         """
-#             Update the weather condition and recalculate the weight.
-#         """
-#         self.weather_condition = weather_condition
-#         self.length = self.get_weight()
+"""This code was meant for dynamic weight updates, which we did not have the time for!
+class Edge:
 
-#     def get_weight(self) -> float:
-#         """
-#         Weather coefficient mark how much does the weather influence the travel time -> prolonging the distance if unfavourable
-#             - they contain (wind_speed, temperature, pressure, storm_strength)
-#         """
-#         weather_coefficients = np.array([0.06, 0.01, 0.008, 0.1])
-#         return self.base_length * (1 + weather_coefficients.T @ self.weather_condition)
-    
+    def __init__(self, start, end, length, weather_condition) -> None:
+        self.start = start
+        self.end = end
+        self.base_length = length
+        self.weather_condition = weather_condition if weather_condition is not None else np.zeros((4,))
+        self.length = self.get_weight()
+
+    # Return the node index start/end
+    def get_other_node(self, node): 
+        if self.start == node:
+            return self.end
+        elif self.end == node:
+            return self.start
+        else:
+            raise ValueError("Node not in edges.")
+        
+
+    def update_weather_condition(self, weather_condition: float) -> None:
+      
+            Update the weather condition and recalculate the weight.
+
+        self.weather_condition = weather_condition
+        self.length = self.get_weight()
+
+    def get_weight(self) -> float:
+        
+        Weather coefficient mark how much does the weather influence the travel time -> prolonging the distance if unfavourable
+            - they contain (wind_speed, temperature, pressure, storm_strength)
+        
+        weather_coefficients = np.array([0.06, 0.01, 0.008, 0.1])
+        return self.base_length * (1 + weather_coefficients.T @ self.weather_condition)
+"""
 
 class Network:
     """
-    Network that manages the creation of the network
+    Manages the creation of the graph environment.
     """
 
     def __init__(self, adjacency_matrix, distance_matrix, coordinates) -> None:
@@ -99,34 +96,6 @@ class Network:
         self.embeddings = None
         self.max_neighbors = 0
 
-    # def update_adj(self):
-    #     self.adj_mat[89, 52] = 1
-    #     self.adj_mat[52, 89] = 1
-
-    #     self.adj_mat[33, 62] = 1
-    #     self.adj_mat[62, 33] = 1
-
-    #     self.adj_mat[104, 62] = 1
-    #     self.adj_mat[62, 104] = 1
-
-    #     self.adj_mat[110, 55] = 1
-    #     self.adj_mat[55, 110] = 1
-
-    #     self.adj_mat[30, 44] = 1
-    #     self.adj_mat[44, 30] = 1
-
-    #     self.adj_mat[27, 25] = 1
-    #     self.adj_mat[25, 27] = 1
-
-    #     self.adj_mat[45, 41] = 1
-    #     self.adj_mat[41, 45] =1
-
-    #     self.adj_mat[96,115] = 1
-    #     self.adj_mat[115, 96] = 1
-
-    #     self.adj_mat[33,54] = 1
-    #     self.adj_mat[54,33] = 1
-
 
     def build_network(self, adjacency_matrix, distance_matrix):
         """
@@ -147,12 +116,11 @@ class Network:
             self.G.add_node(i, pos = (new_waypoint.x, new_waypoint.y))      # Add a node to the graph
 
 
-
         # Create edges and neighbors for each node
         for i in range(self.n_nodes):
 
-            non_zero_positions = np.nonzero(adjacency_matrix[i,:])[0]         # Returns indicies, where adj_matrix[i, :] .!= 0
-            local_neighbors = [int(k) for k in non_zero_positions]  # Create a list for the neighbors of that node - indicies of columns in the adjacency matrix
+            non_zero_positions = np.nonzero(adjacency_matrix[i,:])[0]
+            local_neighbors = [int(k) for k in non_zero_positions]
           
             # Sorting neighbors based on distance in ascending order 
             local_neighbors.sort(key=lambda x: distance_matrix[i,x], reverse=False) # Sort it based on the distance
@@ -183,12 +151,6 @@ class Network:
                     self.G.add_edge(new_edge.start, new_edge.end, weight=new_edge.length)       # Add the edge into the graph
                     t_edge +=1      # Increment the edge index  
 
-
-
-        # print(self.nodes[0].neighbors)
-        # print(self.nodes[10].edges)
-
-        # raise ValueError("a")
         # Find max amount of neighbors
         max_neighbors = 0
         for node in self.nodes:
@@ -209,15 +171,13 @@ class Network:
             - get_other_node(i) returns the index of the node on the other end of an edge, 
                 esseantially returning the neighbor node connected to node i by that edge
     
-        This may be overexplained, but it took me a while to understand
+        This may be overexplained, but it took us a while to understand.
         """
      
         for i in range(self.n_nodes):
             self.nodes[i].edges = sorted(
                 self.nodes[i].edges, 
                 key=lambda edge_index: self.edges[edge_index].get_other_node(i))
-            
-        # self.create_node_embeddings()
             
 
     def update_shortest_paths(self):
@@ -229,12 +189,9 @@ class Network:
                 each node in the graph based on the weights
         """
         self.shortest_paths = dict(nx.shortest_path(self.G, weight = "weight"))   # Calculates the shortest paths -> dict
-
         #self.shortest_paths_weights = dict(nx.shortest_path_length(self.G, weight="weight"))  
-
-
         """
-        The code below is the same thing as the one-liner above. Dunno why they didn't use that. Even if the dicts are created and compared, they are the same. :D
+        The code below is the same thing as the one-liner above. We will stick to the original implementation.
         """
         self.shortest_paths_weights = defaultdict(dict) 
         for start in self.shortest_paths:
@@ -244,17 +201,13 @@ class Network:
 
     def reset(self, adjacency_matrix, distance_matrix):
         """
-        Basically initialize the network.
+        Initialize the network.
         """
 
         self.build_network(adjacency_matrix, distance_matrix)   # Build the network
         self.update_shortest_paths()    # Update the paths
         self.update_nodes_adjacency()   # Update node adjacency
         self.create_node_mask()         # Create node mask for policy
-
-        # for i in range(118):
-        #     print(len(self.nodes[i].neighbors) == len(self.node_mask[i].nonzero()[0]))
-
 
 
     def get_nodes_adjacency(self):
@@ -268,30 +221,6 @@ class Network:
         for i in range(self.n_nodes):
             for neighbor in self.nodes[i].neighbors:    # Utilize that the neighbors are saved as indiced from the adjacency matrix
                 self.adj_mat[i, neighbor] = 1
-
-    def render(self):
-        # pass
-        fig, ax = plt.subplots(figsize=(8, 6))
-
-        last = self.nodes[self.n_nodes-17:self.n_nodes]
-        node_colors = ['pink' if node not in last else 'lightblue' for node in self.nodes]
-
-
-        positions = {node: coordinates for node, coordinates in zip(self.G.nodes, self.coordinates)}
-        #nx.draw_networkx(self.G, positions, with_labels=True, node_color = "pink")
-        nx.draw_networkx_nodes(self.G, positions, node_color =node_colors)
-        nx.draw_networkx_edges(self.G, positions, edge_color='gray')
-        nx.draw_networkx_labels(self.G, positions, font_size=5, font_color='black', ax=ax)
-        
-        # for plane in planes:
-        #     x, y = self.nodes[plane.now].x, self.nodes[plane.now].y
-        #     ax.plot(x,y, marker=(3,0,0), markersize = 15, markerfacecolor = 'red', markeredgecolor='k', label=f'Plane {plane.id}')
-
-        plt.show()
-        fig.canvas.draw()
-        # plt.pause(5)
-        # plt.ioff()
-        # plt.close(fig)
         
     def create_node_mask(self):
         """
@@ -305,12 +234,4 @@ class Network:
                 node_mask += [0] * (self.max_neighbors-num_edges)
             full_mask.append(node_mask)
         self.node_mask = np.array(full_mask, dtype=np.bool_)
-
-    def create_node_embeddings(self):
-        nodetovec = Node2Vec(self.G, dimensions=32, walk_length=80, workers=4, p=1, q=1, weight_key='weight')
-        mod = nodetovec.fit(window=10, min_count=1, batch_words=4)
-        embeddings = {node:  mod.wv[node].tolist() for node in self.G.nodes()}
-        self.embeddings = embeddings
-
-
 

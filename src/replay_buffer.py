@@ -2,7 +2,6 @@ from collections import namedtuple
 from typing import Iterator
 import numpy as np
 import matplotlib.pyplot as plt
-
 import torch
 
 # named tuple for easier access of batches
@@ -40,7 +39,6 @@ class ReplayBuffer(object):
         - agents sample from this buffer, consequently learning for a diverse set of experiences (transitions) -> breaks temporal correlations
     For MARL on graph, this replay buffer does not only store experiences of agents, but also the structural information of the graph.
     """
-
 
     def __init__(
         self,
@@ -132,9 +130,6 @@ class ReplayBuffer(object):
         What is the yield generator?
             It returns batches one at a time. The generator can be iterated over in training loops
         """
-        """
-        Sequences with lenght > 1 are useful for algorithms that take advatange of temporal information, such as RNN
-        """
         # We sample a sequence with length > 1
         # First get the beginning of the buffer (oldest element)
         buffer_start = self.index % self.count
@@ -156,15 +151,6 @@ class ReplayBuffer(object):
         for offset in range(sequence_length):
             indicies = [(start+offset) % self.count for start in sequence_start_indices]
             yield sequence_start_indices, self._get_transition_batch(indicies, device), is_weights
-
-    # def update_sequence_priorities(self, sequence_start_indicies, td_errors, sequence_length):
-    #     td_errors = td_errors.detach().cpu().numpy()
-    #     for i, start_idx in enumerate(sequence_start_indicies):
-    #         # priority = np.abs([i]).max()
-    #         for offset in range(sequence_length):
-    #             if offset < len(td_errors[i]):
-    #                 idx = (start_idx + offset) % self.count
-    #                 self.priorities[idx] = max(np.abs(td_errors[i][offset]), 1e-5)
 
     def update_sequence_priorities(self, sequence_start_indicies, td_errors, sequence_length):
         for i, start_idx in enumerate(sequence_start_indicies):
@@ -335,7 +321,6 @@ class ReplayBuffer(object):
         self.next_node_obs[self.index] = next_node_obs
         self.next_node_adj[self.index] = next_node_adj
         self.next_node_agent_matrix[self.index] = next_node_agent_matrix
-        # ADDED
         self.mask[self.index] = mask
         self.after_mask[self.index] = after_mask
 
@@ -349,6 +334,3 @@ class ReplayBuffer(object):
             - we are storing the most recent transitions
         """
         self.index = (self.index + 1) % self.buffer_size
-
-        # if step % 5000 == 0:
-        #     self.priorities /= self.priorities.max() + 1e-5

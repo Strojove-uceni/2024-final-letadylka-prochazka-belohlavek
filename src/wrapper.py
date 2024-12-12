@@ -12,7 +12,7 @@ class NetMonWrapper:
 
     def __init__(self, env, netmon, startup_iterations) -> None:
         self.env = env
-        self.netmon = netmon    # This is the netmon class from model.py
+        self.netmon = netmon
         self.device = next(netmon.parameters()).device  
 
         self.node_obs = None
@@ -20,7 +20,7 @@ class NetMonWrapper:
         self.node_agent_matrix = None
         self.last_netmon_state = None
         self.current_netmon_state = None
-        assert startup_iterations >= 1, "Number of startup iterations must be >= 1" # This is basically to warm up the LSTMs
+        assert startup_iterations >= 1, "Number of startup iterations must be >= 1" # Warm up for LSTMs
         self.startup_iterations = startup_iterations
         self.frozen = False #   Freeze training 
 
@@ -45,7 +45,7 @@ class NetMonWrapper:
         return np.concatenate((obs, network_obs), axis=-1), adj
 
     def step(self, actions):
-        next_obs, next_adj, reward, done, info= self.env.step(actions)     # Perform the step within an environment
+        next_obs, next_adj, reward, done, info= self.env.step(actions)     # Perform the step within the environment
         next_network_obs = self._netmon_step()      # Perform a step within the netmon class from model.py
         next_joint_obs = np.concatenate((next_obs, next_network_obs), axis=-1)      # Concatenate the results
         return next_joint_obs, next_adj, reward, done, info
@@ -68,7 +68,7 @@ class NetMonWrapper:
         This function performs the step within the environment and with the agents while handling observations.
         """
 
-        # If we froze Message Passing
+        # If we froze Message Passing - will be during eval
         if self.frozen:
             self.node_agent_matrix = self.env.get_node_agent_matrix()
             node_agent_matrix_in = torch.tensor(
@@ -110,7 +110,7 @@ class NetMonWrapper:
             )
             self.current_netmon_state = self.netmon.state
 
-            network_obs = NetMon.output_to_network_obs(
+            network_obs = NetMon.output_to_network_obs(     # Map outputs to agents
                 self.netmon_out, node_agent_matrix_in
             )
             return network_obs.squeeze(0).cpu().detach().numpy()

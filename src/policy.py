@@ -18,7 +18,7 @@ class EpsilonGreedy:
         self.env = env
         self.enable_action_mask = (hasattr(self.env, "enable_action_mask") and self.env.enable_action_mask)
 
-        self.model = model  # NN 
+        self.model = model
         self.step_before_train = step_before_train
         self.epsilon_update_freq = epsilon_update_freq
         self.epsilon_decay = epsilon_decay
@@ -28,8 +28,6 @@ class EpsilonGreedy:
         self.epsilon_tmp = None
 
     def __call__(self, obs, adj):
-        #print("obs is: ", obs.shape)
-        #print("Shape is: ", adj.shape)
         self.step += 1
 
         # Actions (length is == #of agents)
@@ -53,15 +51,14 @@ class EpsilonGreedy:
             q_vals = q_values.masked_fill(node_mask==0, -1e9)
             q_vals = q_vals.masked_fill(last_mask==0, -1e9)
             
-            #node_mask = node_mask.cpu()
             # Squeezes first dimension: 'batch_size' == 1
             q_vals = q_vals.cpu().squeeze(0).detach().numpy()
             for i in range(q_vals.shape[0]):
                 if all(q_vals[i,:]==0):
                     raise ValueError("All actions are bad")
                     
-    
             if self.enable_action_mask:
+                # Remove visited nodes
                 q_vals[self.env.action_mask.nonzero()] = float("-inf")
 
         # Epsilon greedy action selections
@@ -71,13 +68,10 @@ class EpsilonGreedy:
         
 
         if (self.epsilon > 0 and self.step > self.step_before_train and self.step % self.epsilon_update_freq == 0):
-            print("Epsilon was:", self.epsilon)
             self.epsilon *= self.epsilon_decay
-            print("Epsilon is now:", self.epsilon)
             if self.epsilon < 0.01:
                 self.epsilon = 0.01
         
-      
         return actions
                 
 
@@ -91,8 +85,8 @@ class EpsilonGreedy:
         Resets agents.
 
         :param agents_to_reset: is of shape (batch_size, n_agents). A value of 1 indicates reset!
-        
         """
+
         if hasattr(self.model, "state") and self.model.state is not None:
             self.model.state = self.model.state * ~torch.tensor(agents_to_reset, dtype=bool, device= self.model.state.device).unsqueeze(-1)
 
@@ -127,7 +121,7 @@ class EpsilonGreedy:
         
     def last_node_mask(self):
         """
-        
+        Find the last node where the agent came from and mask it.
         """
         full_mask = []
         for plane in self.env.planes:
@@ -137,61 +131,3 @@ class EpsilonGreedy:
                     plane_mask[i] = 0
             full_mask.append(plane_mask)
         return np.array(full_mask, dtype= np.bool_)
-
-class ShortestPath:
-    
-    """
-    :statis_shortest_paths: REMOVED
-    """
-
-    def __init__(self, env, model, action_space, args) -> None:
-        self.env = env
-        assert isinstance(env.get(), Routing)
-
-        self.n_agents = env.get_num_agents()
-        self.model = model
-        self.action_space = action_space
-        self.args = args
-        self.network = None
-
-    
-
-    def reset_episode(self):
-        self.network = None
-
-    def __call__(self, obs, adj):
-        act = np.zeros(self.env.n_planes, dtype=np.int32)
-
-        network = self.env.network
-
-        # Choose next node for each plane
-        for i in range(self.env.n_planes):
-            plane = self.env.planes[i]
-            current_node = plane.now
-            target_node = plane.target
-
-            if current_node == target_node:
-                act[i] = 0 # The plane is finished -> it stays here for one step
-                continue
-
-            # Get the next waypoint on the flight path
-            next_node = network.shortest_paths[current_node][target_node][1]
- 
-            # Find the edge that leads to the next_node
-            for index, j in enumerate(network.nodes[current_node].edges):
-                current_edge = network.edges[j]
-
-                # Now we choose an edge
-                if current_edge.get_other_node(plane.now) == next_node:
-                    act[i] = index + 1 # + 1 is here because index of a node can be 0
-                    break
-
-        return act
-    
-
-
-
-
-
-
-

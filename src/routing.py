@@ -4,8 +4,6 @@ from collections import defaultdict
 import networkx as nx
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
-import json
-
 
 from environment import EnvironmentVariant, NetworkEnv
 from gymnasium.spaces import Discrete
@@ -46,6 +44,7 @@ class Plane:
         self.paths = []
         self.trajectory = []
         self.last_node = None
+        self.targets = []
 
 
     def reset(self, start, target, shortest_path_weight, speed):
@@ -61,20 +60,8 @@ class Plane:
         self.visited_nodes = set([start])
         self.trajectory = []
         self.last_node = -1
-
-
-
-
-class NumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()  # Convert NumPy arrays to lists
-        elif isinstance(obj, np.generic):
-            return obj.item()  # Convert NumPy scalars to native Python types
-        return super().default(obj)
+        self.targets.append(target)
     
-
-
 class Routing(NetworkEnv):
     """
         Changes are:
@@ -89,66 +76,66 @@ class Routing(NetworkEnv):
 
         self.network = network  # This is the network environment that has the graph with nodes and edges
         self.n_planes = n_planes    #   Number of planes
-        self.planes = []    # It will be a list of planes
+        self.planes = []    # List of planes
 
         self.old_node_plane_ids = []
         self.new_node_plane_ids = []
 
-        self.spp = spp
+        self.spp = spp  # This paramter contorls the shortest path that can occur between start and target of a plane
 
-        self.special_nodes = [114, 115, 116, 91, 23, 79, 18, 12, 4, 0, 93, 104, 117, 100, 106, 88, 27]
+        self.special_nodes = [114, 115, 116, 91, 23, 79, 18, 12, 4, 0, 93, 104, 117, 100, 106, 88, 27]  # Airports
 
         """
         Choose how will the info gathered
             - 1 just from an agent
             - 2 from neighbors
             - 3 from the whole network
+
+        Advice:
+            Do not select thrird option for large graphs(50+). 
+            Single vector of observation for a single agent will be of length 200k+ for 118 nodes.
         """
         self.env_var = EnvironmentVariant(env_var) 
 
 
         # Basics
         self.adj_mat = adj_mat
-        #self.amount_of_neighbors = 10 
         self.dist_mat = dist_mat
 
-        # k neighbors
+        # k neighbors to aggregate information from
         self.k = k
 
         # Log information
         self.agent_steps = np.zeros(self.n_planes)
 
-        # Map shortest path to actual agents steps
+        # Evaluation metrics
         self.distance_map = defaultdict(list)
         self.sum_planes_per_node = None
         self.sum_planes_per_edge = None
 
         self.enable_action_mask = enable_action_mask
-        self.action_mask = None # np.zeros((n_planes, self.amount_of_neighbors), dtype=bool)
-
-
-        """
-        It is set like this, because the original had Discrete(4, start = 0). That is because the original could have had packets waiting within a router. Unfortunately, we cannot have a plane waiting in a waypoint. 
-            Maybe we could argue that is flying in a circle, but we will try it like this now.
-        """
-        # The number of choices should be equal to the maximum number of neighbors a node can have
-        # in our case it is quite simple as every node as a static number of neighbors, at least for now
-        self.action_space = None #Discrete(self.amount_of_neighbors, start=1) # {0,1,2, ..., 10} using gym action space
-
+        self.action_mask = None
+        self.action_space = None
         self.eval_info_enabled = False
 
 
+    def set_action_mask(self):
+        """
+            Activates the action mask. Agent will have the visited nodes masked out. 
+        """
+        self.enable_action_mask = True
+
     def set_eval_info(self, val):
-            """
+        """
             Whether the step function should return additional info for evaluation.
 
             :param val: the step function returns additional info if true
-            """
-            self.eval_info_enabled = val
+        """
+        self.eval_info_enabled = val
 
     def set_valid_target(self, valid_range, start):
         """
-        Selects a valid target for the plane. It is different from start and it is at least self.spp hops away from start
+            Selects a valid target for the plane. It is different from start and it is at least self.spp hops away from start
         """
         while True:
             target = np.random.choice(valid_range, size=1, replace=False)[0]
@@ -158,24 +145,25 @@ class Routing(NetworkEnv):
         return target
     
     def set_valid_start(self, valid_range):
+        """
+            Selects a valid start for the plane. Ensures that maximum of 2 planes can spawn at the same airport.
+        """
         while True:
             start = np.random.choice(valid_range, size=1, replace=False)[0]
             start_occupied = 0
             for plane in self.planes:
                 if plane.now == start:
                     start_occupied += 1
-                
             if start_occupied < 3:
                 break
         return start
 
     def reset_plane(self, plane: Plane):
         """
-        Resets the given plane using the settings of this environment.
+            Resets the given plane using the settings of this environment.
 
-        :param plane: the plane will be reset in place.
+            :param plane: the plane will be reset in place.
         """
-
         # Freeing resources on used edge    
         if plane.edge != -1:
             self.network.edges[plane.edge].load -= plane.size
@@ -233,19 +221,12 @@ class Routing(NetworkEnv):
 
         return self.get_observation(), self.get_plane_adjacency()
     
-    def render(self):
-        """
-        Renders the airspace
-        """
-        self.network.render(self.planes)
-
     def get_node_observation(self):
         """
-        Get the node observation for each node in the airspace.
+            Get the node observation for each node in the airspace.
 
-        :return: node observations of shape (num_waypoints, node_observation_size)
+            :return: node observations of shape (num_waypoints, node_observation_size)
         """
-
         observations = []   # All observataions
         for j in range(self.network.n_nodes):   # Go through all the waypoints
             observation = []    # Observation of a single node
@@ -255,7 +236,6 @@ class Routing(NetworkEnv):
                     [0,...,1,0,..,n_nodes-1]
             """
             observation += one_hot_list(j, self.network.n_nodes)    # This is equivalent to .extend()
-            # observation += self.network.embeddings[j]   # Get dense representation instead of a sparse onehot
 
             # Info of a waypoint
             num_planes = 0
@@ -268,7 +248,6 @@ class Routing(NetworkEnv):
             observation.append(num_planes)  # Add the info into the observation
             observation.append(total_load)  # Add the info into the observation
 
-
             # Edge info
             for k in self.network.nodes[j].edges:   # Go through every edge that is connected to the waypoint
                 other_node = self.network.edges[k].get_other_node(j)    # Get conncted node
@@ -276,7 +255,6 @@ class Routing(NetworkEnv):
                 This gathering i do not really understand, but i will trust the original authors.
                 """
                 observation += one_hot_list(other_node, self.network.n_nodes)   # Again create a list of zeros with 1 on the index of the other_node
-                # observation += self.network.embeddings[other_node]
                 observation.append(self.network.edges[k].length)    # Add the info into the observation
                 observation.append(self.network.edges[k].load)      # Add the info into the observation
 
@@ -286,20 +264,20 @@ class Routing(NetworkEnv):
             if num_edges != self.network.max_neighbors:
                 for _ in range(self.network.max_neighbors-num_edges):
                     observation += one_hot_list(-1, self.network.n_nodes)
-                    # observation += one_hot_list(-1, 32)
-                    observation.append(-1)
-                    observation.append(-1)
+                    observation.append(-1)  # Invalid placeholder
+                    observation.append(-1)  # Invalid placeholder
 
 
             observations.append(observation)    # Append the waypoint observation into all observations
+
         # The array will be of size (num_nodes, total_observation_size), total_observation_size is something like 1463
-        return np.array(observations, dtype=np.float32) # Transform this into a numpy array
+        return np.array(observations, dtype=np.float32)
     
     def get_node_aux(self):
         """
-        Auxilary targets for each node in the network.
+            Auxilary targets for each node in the network.
 
-        :return: Auxilary targets of shape (num_nodes, node_aux_target_size)
+            :return: Auxilary targets of shape (num_nodes, node_aux_target_size)
         """
         aux = []
         for j in range(self.network.n_nodes):
@@ -312,27 +290,26 @@ class Routing(NetworkEnv):
 
             aux.append(aux_j)
 
-        """
-        The output is of shape: (n_waypoints, n_waypoints) with the addition that diagonal is 0
-        """
+        
+        # The output is of shape: (n_waypoints, n_waypoints) with the addition that diagonal is 0
+        
         return np.array(aux, dtype=np.float32)
 
     def get_node_agent_matrix(self):
         """
-        Gets a matrix that indicates where agents are located,
-        matrix[n, a] = 1 if agent a is on node n and 0 otherwise.
+            Gets a matrix that indicates where agents are located,
+            matrix[n, a] = 1 if agent a is on node n and 0 otherwise.
 
-        :return: the node agent matrix of shape (n_nodes, n_agents)
+            :return: the node agent matrix of shape (n_nodes, n_agents)
         """
         node_agent = np.zeros((self.network.n_nodes, self.n_planes), dtype=np.int8)
         for i in range(self.n_planes):
             node_agent[self.planes[i].now, i] = 1
-
         return node_agent
 
     def get_observation(self):
         """
-        This function gathers observations for each PLANE.
+            This function gathers observations for each PLANE.
         """
         observations = [] 
 
@@ -346,49 +323,35 @@ class Routing(NetworkEnv):
             observation = []    # Init observation
 
             # Plane observation
-            #print(one_hot_list(self.planes[i].now, self.network.n_nodes))
-            observation += one_hot_list(self.planes[i].now, self.network.n_nodes)       # Places 1 on the index of the node where the plane is
-            observation += one_hot_list(self.planes[i].target, self.network.n_nodes)    # Places 1 on the index of the target node
-            # observation += self.network.embeddings[self.planes[i].now]
-            # observation += self.network.embeddings[self.planes[i].target]
+            observation += one_hot_list(self.planes[i].now, self.network.n_nodes)  
+            observation += one_hot_list(self.planes[i].target, self.network.n_nodes)
 
             # Planes should know where they are coming from when traveling on an edge
             observation.append(int(self.planes[i].edge != -1))  # Check if the plane is on an edge
             if self.planes[i].edge != -1:   # If it is on an edge
-                other_node = self.network.edges[self.planes[i].edge].get_other_node(self.planes[i].now)     # Get to where it is going 
-                # observation += self.network.embeddings[other_node]
+                other_node = self.network.edges[self.planes[i].edge].get_other_node(self.planes[i].now)
             else:
                 other_node = -1     # In a waypoint
-                # observation += one_hot_list(other_node, 32)
 
-            observation += one_hot_list(other_node, self.network.n_nodes)   # Again, encode the position in a vector - if it is in a waypoint, it will create a 0 vector
-            # observation += self.network.embeddings[other_node]
-
+            observation += one_hot_list(other_node, self.network.n_nodes) 
             observation.append(self.planes[i].time)
-            observation.append(self.planes[i].size) # TODO: WE WOULD LIKE TO ADD SPEED HERE!!!
+            observation.append(self.planes[i].size) 
             observation.append(self.planes[i].id)
 
             
             # Edge information
             for j in self.network.nodes[self.planes[i].now].edges:  # Go through all edges of i-th node
-                # print(len(self.network.nodes[self.planes[i].now].edges))
                 other_node = self.network.edges[j].get_other_node(self.planes[i].now)
-
                 observation += one_hot_list(other_node, self.network.n_nodes)
-                # observation += self.network.embeddings[other_node]
                 observation.append(self.network.edges[j].length)
                 observation.append(self.network.edges[j].load)
-
-                # Here is missing a big chunk of commmented code that involed appending the shortest path weights, authors had it commented
-
 
             # Mask nodes with less than maximum neighbors
             num_edges = len(self.network.nodes[self.planes[i].now].edges)
             if num_edges != self.network.max_neighbors:
                 for i in range(self.network.max_neighbors-num_edges):
                     observation += one_hot_list(-1, self.network.n_nodes)
-                    # observation += one_hot_list(-1, 32)
-                    observation.append(-1)
+                    observation.append(-1)  # Invalid placeholder
                     observation.append(-1)
 
 
@@ -400,9 +363,8 @@ class Routing(NetworkEnv):
             for j in range(self.n_planes):  # For each plane, go through every other plane
                 if j == i:
                     continue
-
-                if (self.planes[j].now in self.network.nodes[self.planes[i].now].neighbors) | (self.planes[j].now == self.planes[i].now):   # If some other plane is in some neighboring waypoint or they are at the same waypoint
-
+                # If some other plane is in some neighboring waypoint or they are at the same waypoint
+                if (self.planes[j].now in self.network.nodes[self.planes[i].now].neighbors) | (self.planes[j].now == self.planes[i].now):
                     self.planes[i].neigh.append(j)  # Add the plane as a neighbor to the i-th plane
 
                     # Add neighbor information in observation (until k neighbors)
@@ -425,7 +387,6 @@ class Routing(NetworkEnv):
             # Add global information
             if self.env_var == EnvironmentVariant.GLOBAL:
                 observation_numpy = np.concatenate((observation_numpy, global_obs))
-            
             observations.append(observation_numpy)
         
         return np.array(observations, dtype=np.float32)
@@ -436,26 +397,22 @@ class Routing(NetworkEnv):
             - act is a vector of shape (n_planes)
             - each number is the index of the edge they have chosen for traversal
         """
-
         reward = np.zeros(self.n_planes, dtype=np.float32)  # Define reward for each plane
         looped = np.zeros(self.n_planes, dtype=np.float32)
         done = np.zeros(self.n_planes, dtype=bool)          # Done planes
         success = np.zeros(self.n_planes, dtype=bool)       # Succesful planes
         drop_plane = np.zeros(self.n_planes, dtype=bool)
-
         shortest_edges = np.zeros(self.n_planes, dtype=bool)
-        blocked = 0 # 
+        blocked = 0 # Blocked planes
 
         delays = [] # Dunno about this
         delays_arrived = []
         spr = []
         self.agent_steps += 1
 
-
         # Update old_node_plane_ids for q_values masking
         self.old_node_plane_ids = [plane.now for plane in self.planes]
         
-
         # Collect positions of planes
         if self.eval_info_enabled:
             for i in range(self.n_planes):
@@ -465,6 +422,8 @@ class Routing(NetworkEnv):
                 else:
                     plane.paths[plane.run].append(plane.now)               # Add node to plane path
 
+
+        # Planes are shuffled to not prefer planes with lower ids
         random_plane_order = np.arange(self.n_planes)
         np.random.shuffle(random_plane_order)
         
@@ -472,14 +431,10 @@ class Routing(NetworkEnv):
         for i in random_plane_order:
             # agent i controls plane i
             plane = self.planes[i]
-
-            # if plane.edge != -1:
-            #     plane.trajectory.append(-1*plane.edge)
-            # else:
-            plane.trajectory.append(plane.now)
-
+            
             # Eval info
             if self.eval_info_enabled:
+                plane.trajectory.append(plane.now)  # Remember trajectory of a plane
                 if plane.edge == -1:
                     self.sum_planes_per_node[plane.now] += 1
 
@@ -488,9 +443,8 @@ class Routing(NetworkEnv):
 
                 t = self.network.nodes[plane.now].edges[act[i]] #-1   # Select an outgoing edge based on policy
 
-                # Note that planes that are handled earlier in this loop are prioritized
                 if self.network.edges[t].load + plane.size > 1.5: 
-                    reward[i] -= 10.0   # we really don't want this to happen
+                    reward[i] -= 10.0
                     blocked += 1
                     shortest_edges[i] = False
                     print("I am BLOCKED")
@@ -517,33 +471,27 @@ class Routing(NetworkEnv):
                         reward[i] += 3.0    # 5.0
                     else:
                         shortest_edges[i] = False
-                        # reward[i] += 0.5
                         progres = dist_to_target - dist_after_step
                         if progres > 0:
                             reward[i] += 1.5 * np.exp(0.002 * progres) 
-                        # else:
-                        #     reward[i] -= 3 + min(abs(0.0002 * progres), 0.5)
-
                     
                     # Time penalty
                     reward[i] -= 0.01
 
-                    if dist_to_target < 250: #and next_node != plane.target:
+                    if dist_to_target < 250:
                         for edge in self.network.nodes[plane.now].edges:
                             if self.network.edges[edge].get_other_node(plane.now) == plane.target and next_node != plane.target:
-                                #print("Route exits, didn't take it!")
                                 reward[i] -= 1.0
                        
-
                     # Already set the next position
                     plane.now = next_node
 
                     if plane.now in plane.visited_nodes:
                         looped[i] = 1 
-                        reward[i] -= 2.0    # 1
+                        reward[i] -= 2.0
                     else:
                         plane.visited_nodes.add(plane.now)
-                        reward[i] += 2.5    #1.5
+                        reward[i] += 2.5
 
         # INFO
         if self.eval_info_enabled:
@@ -582,7 +530,6 @@ class Routing(NetworkEnv):
                 )
             )
 
-
         # In-flight planes (=> effect of actions)
         for i in range(self.n_planes):
             plane = self.planes[i]
@@ -604,24 +551,19 @@ class Routing(NetworkEnv):
                 if plane.edge != -1:    # If on an edge
                     self.action_mask[i] = 0
                 else:
-                    """
-                    This is the old implementation.
-                    """
                     for edge_i, e in enumerate(self.network.nodes[plane.now].edges):
                          self.action_mask[i, edge_i] = self.network.edges[e].get_other_node(plane.now) in plane.visited_nodes   # If it is, place 1
-
+                    # Check if plane can fly anywhere
                     boundary = len(self.network.nodes[plane.now].edges)
                     if self.action_mask[i].sum() == boundary:
                         drop_plane[i] = True
                         print(f"EMERGENCY LANDING for plane {plane.id}")
-                        pass
 
             # The plane has reached the target
             has_reached_target = plane.edge == -1 and plane.now == plane.target     # If not on an edge and at the target waypoint            
             if has_reached_target or drop_plane[i]:
                 if has_reached_target == False:
                     reward[i] += -20
-                # reward[i] += 20.0 if has_reached_target else -20 
                 done[i] = True
                 success[i] = has_reached_target
 
@@ -632,24 +574,20 @@ class Routing(NetworkEnv):
                 if success[i]:
                     delays_arrived.append(self.agent_steps[i])
                     spr_ratio = self.agent_steps[i]/opt_distance*plane.speed
-                    spr.append(spr_ratio) # Nasobeni    # Normalize OPT DISTANCE => LENGTH OF EDGES
-                    reward[i] += 10.0 * (1+ 1/spr_ratio)
+                    spr.append(spr_ratio)
+                    reward[i] += 10.0 * (1+ 1/spr_ratio)    # Incraesed reward for shortest path
 
                     if self.eval_info_enabled:
                         self.distance_map[opt_distance].append(self.agent_steps[i])
-                    print("Plane ", plane.id, " reached the target.")
+                        print("Plane ", plane.id, " reached the target.")
 
-                # Not sure about delays
+                # Reset plane and metrics after finishing route
                 delays.append(self.agent_steps[i])
                 self.agent_steps[i] = 0
                 self.reset_plane(plane)
                 
-
-
-        # print(self.planes[0].trajectory)
         observations = self.get_observation()   # Get plane observations
         adj = self.get_plane_adjacency() 
-
 
 
         # Info
@@ -680,7 +618,6 @@ class Routing(NetworkEnv):
         # Update new_node_plane_ids for q_values masking
         self.new_node_plane_ids = [plane.now for plane in self.planes]
 
-        # print(reward)
         return observations, adj, reward, done, info
                         
     def get_nodes_adjacency(self):
@@ -691,7 +628,6 @@ class Routing(NetworkEnv):
         Get an adjacency matrix for planes of shape (n_planes, n_planes),
             where the second dimension contains the neighbors of the agents in the first dimension -> (plane, neighbors)
         """
-
         adj = np.eye(self.n_planes, self.n_planes, dtype=np.int8)
         for i in range(self.n_planes):
             for j in self.planes[i].neigh:
@@ -706,6 +642,9 @@ class Routing(NetworkEnv):
         return self.network.n_nodes
     
     def compute_distance(self, idx1, idx2):
+        """
+            Compute airdistance between two nodes.
+        """
         node_1 = self.network.nodes[idx1]
         node_2 = self.network.nodes[idx2]
         return ((node_1.x-node_2.x)**2 + (node_1.y -node_2.y)**2)**0.5
@@ -715,19 +654,10 @@ class Routing(NetworkEnv):
         for agent_step in agent_steps:
             if agent_step != 0:
                 info["delays"].append(agent_step)
-
         return info
-    
-    # def save_paths(self):
-    #     for i in range(self.n_planes):
-    #         main_dict = {}
-    #         plane = self.planes[i]
-    #         main_dict[plane.id] = {i: np.array(path,dtype=np.int64) for i, path in enumerate(plane.paths)}
-    #         #print("Plane")
-    #         with open(f'planes/data{plane.id}.json', 'w') as f:
-    #             json.dump(main_dict, f, cls=NumpyEncoder)
 
     def plot_trajectory(self):
+        from matplotlib.patches import Circle
 
         def get_angle(start_pos, end_pos):
             """Calculate the angle in degrees from start_pos to end_pos."""
@@ -735,8 +665,6 @@ class Routing(NetworkEnv):
             delta_y = end_pos[1] - start_pos[1]
             angle = np.degrees(np.arctan2(delta_y, delta_x))  # Adjust based on symbol orientation
             return angle
-
-        plane_icon = mpimg.imread('data/plane_pic.png')
         
         """ Plots the trajectory of each plane """
         
@@ -788,11 +716,12 @@ class Routing(NetworkEnv):
         legend_lines = [ax.plot([], [], color=color, label=f'Plane: {plane.id}', linewidth=1)[0] for plane, color in planes_colors.items()]
         
         ax.legend()
-        
+        active_booms = []
         # ADDED
         # Create a list to hold the annotation boxes for planes
         plane_annotations = {plane: None for plane in self.planes}  
         plane_texts = {plane: None for plane in self.planes}
+        targets_reached = [0 for _ in range(self.n_planes)]
 
         def update_trajectory_render(frame):
             ax.clear()
@@ -811,7 +740,7 @@ class Routing(NetworkEnv):
             legend_lines = [ax.plot([], [], color=color, label=f'Plane: {plane.id}', linewidth=1)[0] for plane, color in planes_colors.items()]
             ax.legend()
             
-            for plane in self.planes:
+            for i, plane in enumerate(self.planes):
                 color = planes_colors[plane]
                 
                 if 0 < frame < len(plane.trajectory):
@@ -834,6 +763,20 @@ class Routing(NetworkEnv):
                     # rotation=angle,
                     # rotation_mode='anchor'
                     )
+
+                    if plane.trajectory[frame] == plane.targets[targets_reached[i]]:
+                        targets_reached[i] += 1
+                        # Add a new boom effect at this position
+                        boom = {
+                            'position': (end_pos[0],end_pos[1]),
+                            'radius': 0.0,
+                            'max_radius': 0.3,  # Adjust for size of the boom
+                            'color': 'yellow',
+                            'alpha': 1.0
+                        }
+                        active_booms.append(boom)
+
+
                 
                 for i, edge in enumerate(planes_trajectories[plane]):
                     alpha = max(0.1, 1 - (frame - i) / 50)  # Fading factor (adjust "5" for longer trails)
@@ -843,6 +786,25 @@ class Routing(NetworkEnv):
                 if frame < len(plane.trajectory):
                     current_node = plane.trajectory[frame]
                     nx.draw_networkx_nodes(self.network.G, pos, nodelist=[current_node], node_color=color, ax=ax,node_size=1)
+
+                # Update and draw boom effects
+                booms_to_remove = []
+                for boom in active_booms:
+                    # Create a Circle patch
+                    circle = Circle(boom['position'], boom['radius'], color=boom['color'], alpha=boom['alpha'], fill=True, linewidth=0)
+                    ax.add_patch(circle)
+                    
+                    # Update boom properties
+                    boom['radius'] += 300  # Expansion speed
+                    boom['alpha'] -= 0.02    # Fade speed
+                    
+                    # Remove booms that have reached max radius or are fully transparent
+                    if boom['radius'] > boom['max_radius'] or boom['alpha'] <= 0:
+                        booms_to_remove.append(boom)
+                
+                # Remove finished booms
+                for boom in booms_to_remove:
+                    active_booms.remove(boom)
                 
             return list(plane_texts.values())
         
@@ -866,244 +828,194 @@ class Routing(NetworkEnv):
             """
         )
 
-    def animation(self):
-        plane_colors = {plane.id: f"C{i}" for i, plane in enumerate(self.planes)}
-
-        def gather_flight_paths():
-            flight_paths = []
-            for plane in self.planes:
-                flight_paths.append(plane.paths[0])
-            return np.array(flight_paths)
-
-        path_matrix = np.transpose(gather_flight_paths())   # Transpose for faster retrivial
-
-        pos = {i: np.array([node.x, node.y]) for i, node in enumerate(self.network.nodes)}
-
-        nodes = np.array([pos[v] for v in self.network.G])
-
-        edges = np.array([(pos[u], pos[v]) for u, v in self.network.G.edges()])
-
-        num_edges = len(self.network.G.edges())
-
-
-        def get_colors(index):
-            node_colors = ["grey" for i in range(self.network.n_nodes)]
-            edge_colors = ["black" for i in range(num_edges)]
-            edge_widths = [1 for i in range(num_edges)]
-            sizes = [100 for i in range(self.network.n_nodes)]
-            for j in range(path_matrix.shape[1]):
-                i = path_matrix[index,j]
-                if i >= 0:
-                    node_colors[i] = plane_colors[j]
-                    sizes[i] = 350
-                else:
-                    edge_colors[i] = plane_colors[j]
-                    edge_widths[i] = 3
-
-            return node_colors, edge_colors, edge_widths,sizes
-
-        def init():
-            ax.scatter(*nodes.T, alpha=1, s =100, color="blue")
-            for edge in edges:
-                ax.plot(*edge.T, color="black", linewidth=1)
-            ax.grid(False)
-            ax.set_axis_off()
-            plt.tight_layout()
-            return
-        
-        def _frame_update(index):
-            ax.clear()
-            node_colors, edge_colors, edge_widths, sizes = get_colors(index)
-            ax.scatter(*nodes.T, alpha=1, s =sizes, color=node_colors)
-            for i, vizedge in enumerate(edges):
-                ax.plot(*vizedge.T, color=edge_colors[i], linewidth=edge_widths[i])
-
-
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.grid(False)
-        ax.set_axis_off()
-        plt.tight_layout()
-        ani = animation.FuncAnimation(
-            fig,
-            _frame_update,
-            interval=1500,
-            cache_frame_data=False,
-            frames=path_matrix.shape[0],
-        )
-        plt.show()
-
     def animation_2(self):
-
-
-        plane_colors = {plane.id: f"C{i}" for i, plane in enumerate(self.planes)}
-
-        def gather_flight_paths():
-            flight_paths = []
-            for plane in self.planes:
-                flight_paths.append(plane.paths[0])
-            return np.array(flight_paths)
-        
-        num_planes = self.n_planes
-
-        path_matrix = np.transpose(gather_flight_paths())   # Transpose for faster retrivial
-
-        pos = {i: np.array([node.x, node.y]) for i, node in enumerate(self.network.nodes)}
-
-        nodes = np.array([pos[v] for v in self.network.G])
-
-        edges = list(self.network.G.edges())
-
-        #edge_coords = np.array([(pos[u], pos[v]) for u, v in edges])
-
-        num_nodes = len(nodes)
-
-        num_edges = len(self.network.G.edges())
-
-        #edge_to_idx = {edge: idx for idx, edge in enumerate(edges)}
-
-        plane_img = mpimg.imread('data/plane_pic.png')
-
-        #
-        def get_offset_img(img, zoom=1):
-            return OffsetImage(img, zoom=zoom)
-        
-        fig, ax = plt.subplots(figsize=(10, 8))
-        ax.set_aspect('equal')
-        ax.grid(False)
-        ax.set_axis_off()
-        plt.tight_layout()
-
-        # Draw nodes
-        scatter_nodes = ax.scatter(*nodes.T, alpha=1, s=100, color="grey")
-
-        # Draw edges
-        edge_lines = []
-        for edge in edges:
-            line, = ax.plot([pos[edge[0]][0], pos[edge[1]][0]], [pos[edge[0]][1], pos[edge[1]][1]], color="black", linewidth=1, alpha=0.5)
-            edge_lines.append(line)
-
-        trail_length=2
-        plane_artists = {}
-        trail_artists = {}
-        for plane in self.planes:
-            imagebox = AnnotationBbox(get_offset_img(plane_img, zoom=1), (0,0), frameon=False, zorder=5)
-            ax.add_artist(imagebox)
-            plane_artists[plane.id] = imagebox
-
-            trail_scatter = []
-            for t in range(trail_length):
-                trail_imagebox = AnnotationBbox(get_offset_img(plane_img, zoom=1), (0, 0), frameon=False, zorder=4, alpha=0.5)
-                ax.add_artist(trail_imagebox)
-                trail_scatter.append(trail_imagebox)
-            trail_artists[plane.id] = trail_scatter
-        # ax.legend(loc='upper right')
-
-         # Function to initialize the animation
-        def init_anim():
-            scatter_nodes.set_facecolor("grey")
-            scatter_nodes.set_sizes([100]*len(nodes))
-            for line in edge_lines:
-                line.set_color("black")
-                line.set_linewidth(1)
-                line.set_alpha(0.5)
-            for imagebox in plane_artists.values():
-                imagebox.xy = (-100, -100)  # Place off the plot initially
-            for trail_list in trail_artists.values():
-                for trail in trail_list:
-                    trail.xy = (-100, -100)  # Place off the plot initially
-            return [scatter_nodes] + edge_lines + list(plane_artists.values()) + [trail for trails in trail_artists.values() for trail in trails]
-        
-        def _frame_update(index):
-            # Reset edges
-            for line in edge_lines:
-                line.set_color("black")
-                line.set_linewidth(0.5)
-                line.set_alpha(0.1)
             
-            # Init counts for nodes and edges
-            node_counts = np.zeros(num_nodes)
-            edge_counts = np.zeros(num_edges)
-            plane_nodes = np.zeros(num_nodes)
-            plane_edges = np.zeros(num_edges)
+            """ Plots the trajectory of each plane """
+            
+            special_nodes = [114, 115, 116, 91, 23, 79, 18, 12, 24, 0, 93, 71, 117, 100, 106, 88, 27]
+            
+            special_labels = {
+                12: "Berlin",
+                117: "Copenhagen",
+                0: "Vienna",
+                27: "Warsaw",
+                24: "Prague",
+                71: "Budapest",
+                91: "Amsterdam",
+                18: "Munich",
+                23: "Zurich",
+                88: "Bucharest",
+                93: "Zagreb",
+                115: "Milan",
+                79: "Frankfurt",
+                116: "Brussels",
+                100: "Belgrade",
+                114: "Rome",
+                106: "Sarajevo"
+            }
+            
+            planes_colors = {plane: f"C{i}" for i, plane in enumerate(self.planes)}
+            
+            pos = {node: coord for node, coord in zip(self.network.G.nodes, self.network.coordinates)}
+            
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            # img = mpimg.imread('c:/Users/TomasProchazka/PythonProjects/2024-final-letadylka-prochazka-belohlavek/data/MAP.png')
+            # ax.imshow(img, extent=[min(x[0] for x in pos.values()), max(x[0] for x in pos.values()), 
+            #                    min(x[1] for x in pos.values()), max(x[1] for x in pos.values())], alpha=0.3)
+            
+            planes_trajectories = {plane: [] for plane in self.planes}
+            
+            node_colors = ["#DAA520" if node in special_nodes else "grey" for node in self.network.G.nodes]
+            
+            nx.draw_networkx(self.network.G, pos, with_labels=True, node_color=node_colors, edge_color="black", ax=ax)
+            nx.draw_networkx_labels(self.network.G, pos, labels=special_labels, font_size=10, ax=ax)
+            
+            legend_lines = [ax.plot([], [], color=color, label=f'Plane: {plane.id}', linewidth=1)[0] for plane, color in planes_colors.items()]
+            
+            ax.legend()
+            
+            plane_texts = {plane: None for plane in self.planes}
+            plane_edge_pos = {plane: [self.network.nodes[plane.start].x, self.network.nodes[plane.start].y] for plane in self.planes}
 
-            for j in range(num_planes):
-                i = path_matrix[index,j]
-                if i >= 0:
-                    node_counts[i] += 1
-                    plane_nodes[i] = self.planes[j].id 
-                else:
-                    edge_idx = abs(i)
-                    edge_counts[edge_idx] += 1
-                    plane_edges[edge_idx] = self.planes[j].id
+            node_colors = ["#DAA520" if node in special_nodes else "grey" for node in self.network.G.nodes]
+            node_size = [100 if node in special_nodes else 100 for node in self.network.G.nodes]
+            node_alpha = [1 if node in special_nodes else 0.3 for node in self.network.G.nodes]
 
-
-            # Update nodes
-            node_colors = []
-            node_sizes = []
-            for i in range(num_nodes):
-                count = node_counts[i]
-                if count > 0:
-                    node_colors.append(plane_colors[plane_nodes[i]])
-                    node_sizes.append(100 + 50*count)
-                else:
-                    node_colors.append("grey")
-                    node_sizes.append(100)
+            
+            def update_trajectory_render(frame):
+                ax.clear()
+                # ax.imshow(img, extent=[min(x[0] for x in pos.values()), max(x[0] for x in pos.values()), 
+                #                min(x[1] for x in pos.values()), max(x[1] for x in pos.values())], alpha=0.3)
+                
+                nx.draw_networkx_nodes(self.network.G, pos, node_color=node_colors, ax=ax,  alpha=node_alpha, node_size=node_size)
+                nx.draw_networkx_labels(self.network.G, pos, labels=special_labels, font_size=7, ax=ax)
+                # Draw edges
+                nx.draw_networkx_edges(
+                        self.network.G,
+                        pos,
+                        edge_color="black",
+                        ax=ax,
+                        alpha=0.3,  # Uniform alpha for edges
+                        width=1
+                    )
+                
+                legend_lines = [ax.plot([], [], color=color, label=f'Plane: {plane.id}', linewidth=1)[0] for plane, color in planes_colors.items()]
+                
+                for plane in self.planes:
+                    color = planes_colors[plane]
                     
-            scatter_nodes.set_facecolor(node_colors)
-            scatter_nodes.set_sizes(node_sizes)
-
-
-            # Update edges
-            for i, line in enumerate(edge_lines):
-                if edge_counts[i] > 0:
-                    line.set_color(plane_colors[plane_edges[i]])
-                    line.set_linewidth(3)
-                    line.set_alpha(0.9)
-            
-            # Update plane positions + trails
-            for j, plane in enumerate(self.planes):
-                id = plane.id
-                i = path_matrix[index,j]
-                if i >= 0:
-                    coord = pos[i]
-                    plane_artists[id].xy = (coord[0], coord[1])
-                else:
-                    edge_idx = abs(i)
-                    edge = edges[edge_idx]
-                    coord = (pos[edge[0]] + pos[edge[1]])/2
-                    plane_artists[id].xy = (coord[0], coord[1])
-
-                for t in range(trail_length):
-                    past_index = index -(t+1)
-                    if past_index >= 0:
-                        past_i = path_matrix[past_index,j]
-                        if past_i >= 0:
-                            past_coord = pos[past_i]
-                            trail_artists[id][t].xy = (past_coord[0], past_coord[1])
-                        else:
-                            past_edge_idx = abs(past_i)
-                            past_edge = edges[past_edge_idx]
-                            # print((pos[past_edge[0]] + pos[past_edge[1]])/2)
-                            past_coord = (pos[past_edge[0]] + pos[past_edge[1]])/2
-                            trail_artists[id][t].xy = (past_coord[0], past_coord[1])
+                    if 0 < frame < len(plane.trajectory):
+                        
+                        if plane.trajectory[frame - 1] > 0 and plane.trajectory[frame] > 0: # This if function alone is sufficient for visualisation without moving planes
+                            current_edge = plane.trajectory[frame - 1], plane.trajectory[frame]
+                            planes_trajectories[plane].append(current_edge)
+                            plane_edge_pos[plane] = [self.network.nodes[plane.trajectory[frame]].x, self.network.nodes[plane.trajectory[frame]].y]
+                            # Add new text with Unicode airplane symbol
+                            plane_texts[plane] = ax.text(
+                            plane_edge_pos[plane][0],
+                            plane_edge_pos[plane][1],
+                            '\u2708',  # Unicode airplane symbol ✈
+                            fontsize=40,  # Adjust as needed
+                            color=color,
+                            ha='center',
+                            va='center',
+                            # rotation=angle,
+                            # rotation_mode='anchor'
+                            )
+                        
+                        elif plane.trajectory[frame - 1] < 0 and plane.trajectory[frame] > 0:
+                            plane_edge_pos[plane] = [self.network.nodes[plane.trajectory[frame]].x, self.network.nodes[plane.trajectory[frame]].y]
+                            # Add new text with Unicode airplane symbol
+                            plane_texts[plane] = ax.text(
+                            plane_edge_pos[plane][0],
+                            plane_edge_pos[plane][1],
+                            '\u2708',  # Unicode airplane symbol ✈
+                            fontsize=40,  # Adjust as needed
+                            color=color,
+                            ha='center',
+                            va='center',
+                            # rotation=angle,
+                            # rotation_mode='anchor'
+                            )
+                        elif plane.trajectory[frame - 1] > 0 and plane.trajectory[frame] < 0:
+                            c_e = self.network.edges[-1 * plane.trajectory[frame]]
                             
-                    else:
-                        trail_artists[id][t].xy = (-100, -100)
-                  
-            return [scatter_nodes] + edge_lines + list(plane_artists.values()) + [trail for trails in trail_artists.values() for trail in trails]
+                            current_edge = plane.trajectory[frame - 1], c_e.end
+                            planes_trajectories[plane].append(current_edge)
+                            
+                            start_pos = self.network.nodes[plane.trajectory[frame-1]].x, self.network.nodes[plane.trajectory[frame-1]].y
+                            end_pos = self.network.nodes[c_e.end].x, self.network.nodes[c_e.end].y
+                            
+                            plane_edge_pos[plane][0] = start_pos[0] + (end_pos[0] - start_pos[0]) /2 #self.dist_mat[plane.trajectory[frame - 1]][c_e.end]
+                            plane_edge_pos[plane][1] = start_pos[1] + (end_pos[1] - start_pos[1]) /2 #self.dist_mat[plane.trajectory[frame - 1]][c_e.end]
+                            # Add new text with Unicode airplane symbol
+                            plane_texts[plane] = ax.text(
+                            plane_edge_pos[plane][0],
+                            plane_edge_pos[plane][1],
+                            '\u2708',  # Unicode airplane symbol ✈
+                            fontsize=40,  # Adjust as needed
+                            color=color,
+                            ha='center',
+                            va='center',
+                            # rotation=angle,
+                            # rotation_mode='anchor'
+                            )
+                    
+                        elif plane.trajectory[frame - 1] < 0 and plane.trajectory[frame] < 0:
+                            c_e = self.network.edges[-1 * plane.trajectory[frame]]
+                            
+                            current_edge = c_e.start, c_e.end
+                            planes_trajectories[plane].append(current_edge)
+                            
+                            start_pos = self.network.nodes[c_e.start].x, self.network.nodes[c_e.start].y
+                            end_pos = self.network.nodes[c_e.end].x, self.network.nodes[c_e.end].y
+                            
+                            plane_edge_pos[plane][0] = start_pos[0] + (end_pos[0] - start_pos[0]) /2# (self.dist_mat[c_e.start][c_e.end] - np.sqrt(np.power(start_pos[0]-plane_edge_pos[plane][0],2) + np.power(start_pos[1] -plane_edge_pos[plane][1],2)))
+                            plane_edge_pos[plane][1] = start_pos[1] + (end_pos[1] - start_pos[1]) /2# (self.dist_mat[c_e.start][c_e.end] - np.sqrt(np.power(start_pos[0]-plane_edge_pos[plane][0],2) + np.power(start_pos[1] -plane_edge_pos[plane][1],2)))
+                            # Add new text with Unicode airplane symbol
+                            plane_texts[plane] = ax.text(
+                            plane_edge_pos[plane][0],
+                            plane_edge_pos[plane][1],
+                            '\u2708',  # Unicode airplane symbol ✈
+                            fontsize=40,  # Adjust as needed
+                            color=color,
+                            ha='center',
+                            va='center',
+                            # rotation=angle,
+                            # rotation_mode='anchor'
+                            )
+                    
+                    # nx.draw_networkx_edges(self.network.G, pos, edgelist=planes_trajectories[plane], edge_color=color, ax=ax)
+                    alpha = 0
+                    line_width = 0
+                    for i, edge in enumerate(planes_trajectories[plane]):
+                        alpha = max(0.1, 1 - (frame - i) / 50)  # Fading factor (adjust "5" for longer trails)
+                        line_width = max(1, 5 - (frame - i) / 2)  # Adjust "3" for initial width and "2" for fading speed
+                        nx.draw_networkx_edges(self.network.G, pos, edgelist=[edge], edge_color=color, alpha=alpha, width=line_width, ax=ax)
+                
+                    # if frame < len(plane.visited_nodes):
+                        # nodelist =[sorted(list(plane.visited_nodes))[frame]]
+                        # nx.draw_networkx_nodes(self.network.G, pos, nodelist=nodelist, node_color=color, ax=ax)
+                    if frame < len(plane.trajectory):
+                        if plane.trajectory[frame] > 0:
+                            current_node = plane.trajectory[frame]
+                            nx.draw_networkx_nodes(self.network.G, pos, nodelist=[current_node], node_color=color, ax=ax, node_size=1)
+                        else:
+                            c_e = self.network.edges[-1*plane.trajectory[frame]]
+                            current_edge = c_e.start, c_e.end
+                            nx.draw_networkx_edges(self.network.G, pos, edgelist=[current_edge], edge_color=color, alpha=alpha, width=line_width, ax=ax)
 
-        # Create the animation
-        ani = animation.FuncAnimation(
-            fig,
-            _frame_update,
-            init_func=init_anim,
-            frames=path_matrix.shape[0],
-            interval=1500,
-            blit=True,
-            repeat=False
-        )
-        plt.show()
+                return list(plane_texts.values())
+                            
+            
+            num_frames = max(len(plane.trajectory) for plane in self.planes)
+            self.animation = FuncAnimation(fig, update_trajectory_render, frames=num_frames, interval=1000, repeat=False)
+            
+            # self.animation.save("planes_trajectory_animation.mp4", writer="ffmpeg") ## possibly save the animation
+            
+            plt.title("Planes Trajectory Animation")
+            plt.show()
 
     def animation_3(self):
         """ Plots the trajectory of each plane """
@@ -1160,8 +1072,3 @@ class Routing(NetworkEnv):
         
         plt.title("Planes Trajectory Animation")
         plt.show()
-
-# e = 1.0
-# for i in range(1088):
-#     e =  e *0.99
-# print(e)

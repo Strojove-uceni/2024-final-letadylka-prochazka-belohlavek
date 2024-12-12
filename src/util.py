@@ -4,7 +4,7 @@ import torch.nn as nn
 import numpy as np
 import torch
 
-
+# Interpolate paramters of a model
 def interpolate_model(a: nn.Module, b: nn.Module, a_weight: float, target: nn.Module):
     """
     Interpolates model parameters from a and b, saves a_weight * a + (1-a_weight) * b in target.
@@ -20,15 +20,13 @@ def interpolate_model(a: nn.Module, b: nn.Module, a_weight: float, target: nn.Mo
         # store interpolation results in a_dict
         a_dict[key] = a_weight * a_dict[key] + (1 - a_weight) * b_dict[key]
 
-    # target.load_state_dict(a_dict)
-
     # Load into target
     if isinstance(target, nn.DataParallel):
         target.module.load_state_dict(a_dict)
     else:
         target.load_state_dict(a_dict)
 
-
+# Loading
 def get_state_dict(model, netmon, args):
     state_dict = {
         "type": type(model).__name__,
@@ -40,7 +38,7 @@ def get_state_dict(model, netmon, args):
 
     return state_dict
 
-
+# Loading files
 def load_state_dict(state_dict, model, netmon):
     if state_dict["type"] != type(model).__name__:
         print(
@@ -65,7 +63,7 @@ def load_state_dict(state_dict, model, netmon):
     else:
         model.load_state_dict(state_dict["state_dict"])
 
-
+# Set attributes of a dictionary 
 def set_attributes(obj, key_value_dict, verbose=False):
     changes_str = ""
     for key in key_value_dict:
@@ -80,24 +78,7 @@ def set_attributes(obj, key_value_dict, verbose=False):
     if verbose:
         print(changes_str, end="")
 
-
-def filter_dict(dict, keys):
-    # return {key: dict[key] for key in keys}
-    to_ret = {}
-    to_ret["model"] = dict['base']['model_type']
-    to_ret["hidden_dim"] = dict['dgn']['hidden_dim']
-    to_ret["dim"] = dict['netmon']['dim']
-    to_ret["encoder_dim"] = dict['netmon']['enc_dim']
-    to_ret["iterations"] = dict['netmon']['iterations']
-    to_ret["rnn_type"] = dict['netmon']['rnn_type']
-    to_ret["agg_type"] = dict['netmon']['agg_type']
-    to_ret["global"] = dict['netmon']['global']
-    to_ret["activation_function"] = dict['base']['activ_f']
-    to_ret["num_heads"] = dict['dgn']['heads']
-    to_ret["num_attention_layers"] = dict['dgn']['att_layers']  
-    return to_ret
-
-
+# One hot representation of nodes
 def one_hot_list(i, max_indices):
     a = [0] * max_indices
     if i >= 0:
@@ -130,29 +111,23 @@ def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
 
-
-def dim_str_to_list(dims: str):
-    if len(dims) == 0:
-        return []
-    return [int(item) for item in dims.split(",")]
-
-
+# Increasing sequence length during trainging 
 def update_sequence_length(step, sequence_length):
     if step % 15000 == 0:
         sequence_length += 2
         print("Sequence length is: ", sequence_length)
     return sequence_length
 
+# Learning rate adjustment during training
 def lr_lambda(current_step):    
     if current_step < 40000:
         return 1.0  # No decay during experience collection
     elif current_step < 210000:  # 40000 + 250000
-        # Linear decay from 1.0 to 0.1 over 250,000 steps
         return 1.0 - 0.9 * ((current_step - 40000) / 210000)
     else:
         return 0.1  # Minimum learning rate after decay
     
-
+# Normalize distance matrix in (1,10) interval
 def normalize_dist_mat(dist_mat, adj_mat, new_min, new_max):
     dist_mat[adj_mat==0] = 0
     min = 100000
@@ -163,3 +138,4 @@ def normalize_dist_mat(dist_mat, adj_mat, new_min, new_max):
     max = np.max(dist_mat)
     # Normalize distance matrix
     return ((dist_mat-min)/(max-min))*(new_max-new_min) + new_min
+
