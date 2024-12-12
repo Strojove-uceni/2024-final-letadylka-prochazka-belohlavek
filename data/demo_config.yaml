@@ -1,0 +1,73 @@
+# config.yaml
+
+base:
+  n_planes: 10
+  n_neighbors: 4
+  env_var: 2
+  activ_f: "leaky_relu"   # leaky_relu
+  model_type: "dgn" # comm_net
+  instant_evaluation: false
+  
+netmon:
+  dim: 256
+  enc_dim: [1024, 512]
+  iterations: 8
+  rnn_type: "lstm"
+  rnn_carryover: true
+  agg_type: "sum"  # sum or gcn
+  neighbor: false
+  global: true
+  start_up_iters: 1 # Number of MP interations after the env reset
+
+dgn:  # hidden_dim is also for DQN
+  hidden_dim: [2048,1024,512]  # 2048
+  heads: 8
+  att_layers: 2
+  kv_values: 32
+
+commnet:
+  comm_rounds: 8  # 8
+
+only_eval:
+  eval: false
+  model_path: ""
+
+device: "cuda"
+
+target_update:
+  steps: 0        # Number of steps between target model updates (0 for smooth updates)
+  tau: 0.01       # Interpolation factor for smooth target model updates
+
+evaluation:
+  episodes: 5                 # Default: 50
+  episode_steps: 250           # Default: 300 - max steps per eval episode
+  output_detailed: false       # Default
+  output_node_state_aux: false # Default
+
+epsilon_greedy:
+  epsilon: 1.0
+  epsilon_decay: 0.900         # 0.996
+  epsilon_update_freq: 100
+
+training:
+  total_steps: 75000             # Default: 1e6
+  step_before_train: 15000       # Default: 2000
+  step_between_train: 10       # Default from authors
+  args: null
+  learning_rate: 0.001
+  att_regularization_coeff: 0.03
+  aux_loss_coeff: 0.01          # Default: 0.03
+  sequence_length: 16            # To adjust
+  gamma: 0.9
+  mini_batch_size: 8 # Experiences drawn from replay buffer
+  debug_plots: false           # Default to false
+  model_checkpoint_steps: 30000 #10000
+
+buffer:
+  seed: 0
+  capacity: 200000                # Default: 200000 
+  replay_half_precision: true
+
+log_buffer:
+  size: 1000                    # Default: 1000
+  plot_last_n: 5000               # Default: 5000
