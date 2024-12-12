@@ -1,6 +1,5 @@
 from network import Network
 from environment import reset_and_get_sizes
-
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -15,7 +14,7 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 from tqdm import tqdm
 import os
-from env.replay_buffer import ReplayBuffer
+from replay_buffer import ReplayBuffer
 from model import DGN, MLP, CommNet, NetMon, DQN
 from routing import Routing
 from bi_gpu_wrapper import NetMonWrapper
