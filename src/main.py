@@ -601,7 +601,7 @@ finally:
                 )                
                 print(json.dumps(metrics, indent = 4, sort_keys=True, default=str))
 
-                env.plot_trajectory() # Plot the animation
+                #env.plot_trajectory() # Plot the animation
 
         except Exception as e:
             traceback.print_exc()
