@@ -47,7 +47,7 @@ evaluation:
 epsilon_greedy:
   epsilon: 1.0
   epsilon_decay: 0.865
-  epsilon_update_freq: 50
+  epsilon_update_freq: 40
 
 training:
   total_steps: 1500
