@@ -1,7 +1,7 @@
 # RL-Planes
 **Authors**: Michal Bělohlávek a Tomáš Procházka
 
-**We advise to download the code and run this project locally to enjoy the animation at the end. Moreover, one can pleasantly move within the configuraion file.**
+**We advise to download the code and run this project locally to enjoy the animation at the end. Moreover, one can pleasantly move within the configuration file.**
 
 ## About
 This project concerns itself with the application of Multi-Agent Reinforcement Learning for automatic routing of planes. We build on the implementation of authors in [previous works](https://github.com/jw3il/graph-marl) and adapted and modified their code to suit our needs. The architecture of this beast comprises of Graph Convolutional Networks, Recurrent Neural Networks and other beautiful machine learning structures. These components are combined to create outputs that almost look like magic, all while employing an extremely thought-out process. 
