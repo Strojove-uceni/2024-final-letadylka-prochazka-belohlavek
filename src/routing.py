@@ -168,7 +168,7 @@ class Routing(NetworkEnv):
             self.network.edges[plane.edge].load -= plane.size
 
         # Reset plane in place
-        speed = 3
+        speed = 5
         range_values = np.array(self.special_nodes)
         
 
@@ -441,7 +441,7 @@ class Routing(NetworkEnv):
                     reward[i] -= 10.0
                     blocked += 1
                     shortest_edges[i] = False
-                    print("I am BLOCKED")
+                    # print("I am BLOCKED")
                 else:
                     # Take this edge
                     plane.edge = t      # Begin traversal of this edge
@@ -652,18 +652,9 @@ class Routing(NetworkEnv):
         return info
 
     def plot_trajectory(self):
-        from matplotlib.patches import Circle
-
-        def get_angle(start_pos, end_pos):
-            """
-                Calculate the angle in degrees from start_pos to end_pos.
-            """
-            delta_x = end_pos[0] - start_pos[0]
-            delta_y = end_pos[1] - start_pos[1]
-            angle = np.degrees(np.arctan2(delta_y, delta_x))  # Adjust based on symbol orientation
-            return angle
-        
-        """ Plots the trajectory of each plane """
+        """
+            Plots the trajectory of each plane.
+        """
         
         special_nodes = [114, 115, 116, 91, 23, 79, 18, 12, 4, 0, 93, 104, 117, 100, 106, 88, 27]
         special_labels = {
@@ -685,19 +676,22 @@ class Routing(NetworkEnv):
             114: "Rome",
             106: "Sarajevo"
         }
-        print(self.planes[0].trajectory)
+
         planes_colors = {plane: f"C{i}" for i, plane in enumerate(self.planes)}
         
         pos = {node: coord for node, coord in zip(self.network.G.nodes, self.network.coordinates)}
         
         fig, ax = plt.subplots(figsize=(10, 8))
+
+        img = mpimg.imread('data/map.png')
+        ax.imshow(img, extent=[min(x[0] for x in pos.values()), max(x[0] for x in pos.values()), 
+                               min(x[1] for x in pos.values()), max(x[1] for x in pos.values())], alpha=0.05)
         
         planes_trajectories = {plane: [] for plane in self.planes}
         
         node_colors = ["#DAA520" if node in special_nodes else "grey" for node in self.network.G.nodes]
         node_size = [100 if node in special_nodes else 100 for node in self.network.G.nodes]
-        node_alpha = [1 if node in special_nodes else 0.3 for node in self.network.G.nodes]
-
+        node_alpha = [1 if node in special_nodes else 0.3 for node in self.network.G.nodes]   
         
         nx.draw_networkx_nodes(self.network.G, pos, node_color=node_colors,ax=ax, alpha=node_alpha, node_size=node_size)
         nx.draw_networkx_labels(self.network.G, pos, labels=special_labels, font_size=7, ax=ax)
@@ -710,16 +704,21 @@ class Routing(NetworkEnv):
             width=1
         )
         
+        
         legend_lines = [ax.plot([], [], color=color, label=f'Plane: {plane.id}', linewidth=1)[0] for plane, color in planes_colors.items()]
         
         ax.legend()
 
         # Create a list to hold the annotation boxes for planes 
         plane_texts = {plane: None for plane in self.planes}
-        # targets_reached = [0 for _ in range(self.n_planes)]
+        targets_reached = [0 for _ in range(self.n_planes)]
+        
+        temp_texts = []
 
         def update_trajectory_render(frame):
             ax.clear()
+            ax.imshow(img, extent=[min(x[0] for x in pos.values()) - 200 , max(x[0] for x in pos.values())-200, 
+                               min(x[1] for x in pos.values())-50, max(x[1] for x in pos.values())-50], alpha=0.05)
             nx.draw_networkx_nodes(self.network.G, pos, node_color=node_colors, ax=ax,  alpha=node_alpha, node_size=node_size)
             nx.draw_networkx_labels(self.network.G, pos, labels=special_labels, font_size=7, ax=ax)
                 # Draw edges
@@ -737,14 +736,19 @@ class Routing(NetworkEnv):
             
             for i, plane in enumerate(self.planes):
                 color = planes_colors[plane]
+            
+            for text in temp_texts:
+                text.remove()
+            temp_texts.clear()
+            
+            for i, plane in enumerate(self.planes):
+                color = planes_colors[plane]
                 
                 if 0 < frame < len(plane.trajectory):
                     current_edge = plane.trajectory[frame - 1], plane.trajectory[frame]
                     planes_trajectories[plane].append(current_edge)
 
-                    start_pos = self.network.nodes[plane.trajectory[frame-1]].x, self.network.nodes[plane.trajectory[frame-1]].y
                     end_pos =  self.network.nodes[plane.trajectory[frame]].x, self.network.nodes[plane.trajectory[frame]].y
-                    angle = get_angle(start_pos, end_pos)
 
                     # Add new text with Unicode airplane symbol
                     plane_texts[plane] = ax.text(
@@ -755,9 +759,19 @@ class Routing(NetworkEnv):
                     color=color,
                     ha='center',
                     va='center',
-                    # rotation=angle,
-                    # rotation_mode='anchor'
                     )
+                    if plane.trajectory[frame] == plane.targets[targets_reached[i]]:
+                        targets_reached[i] += 1
+                        text = ax.text(
+                            end_pos[0],
+                            end_pos[1] - 75,
+                            f"Plane {plane.id} landed.",
+                            fontsize=15,
+                            color='black',
+                            ha='center',
+                            va='bottom'
+                        )
+                        temp_texts.append(text)
 
 
                 
@@ -773,7 +787,7 @@ class Routing(NetworkEnv):
             return list(plane_texts.values())
         
         num_frames = max(len(plane.trajectory) for plane in self.planes)
-        self.animation = FuncAnimation(fig, update_trajectory_render, frames=num_frames, interval=1000, repeat=False)
+        self.animation = FuncAnimation(fig, update_trajectory_render, frames=num_frames, interval=500, repeat=False)
         
         # self.animation.save("planes_trajectory_animation.mp4", writer="ffmpeg") ## possibly save the animation
         
