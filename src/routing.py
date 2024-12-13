@@ -683,9 +683,9 @@ class Routing(NetworkEnv):
         
         fig, ax = plt.subplots(figsize=(10, 8))
 
-        img = mpimg.imread('data/map.png')
-        ax.imshow(img, extent=[min(x[0] for x in pos.values()), max(x[0] for x in pos.values()), 
-                               min(x[1] for x in pos.values()), max(x[1] for x in pos.values())], alpha=0.05)
+        #img = mpimg.imread('data/map.png')
+        #ax.imshow(img, extent=[min(x[0] for x in pos.values()), max(x[0] for x in pos.values()), 
+        #                       min(x[1] for x in pos.values()), max(x[1] for x in pos.values())], alpha=0.05)
         
         planes_trajectories = {plane: [] for plane in self.planes}
         
@@ -717,8 +717,8 @@ class Routing(NetworkEnv):
 
         def update_trajectory_render(frame):
             ax.clear()
-            ax.imshow(img, extent=[min(x[0] for x in pos.values()) - 200 , max(x[0] for x in pos.values())-200, 
-                               min(x[1] for x in pos.values())-50, max(x[1] for x in pos.values())-50], alpha=0.05)
+            #ax.imshow(img, extent=[min(x[0] for x in pos.values()) - 200 , max(x[0] for x in pos.values())-200, 
+            #                   min(x[1] for x in pos.values())-50, max(x[1] for x in pos.values())-50], alpha=0.05)
             nx.draw_networkx_nodes(self.network.G, pos, node_color=node_colors, ax=ax,  alpha=node_alpha, node_size=node_size)
             nx.draw_networkx_labels(self.network.G, pos, labels=special_labels, font_size=7, ax=ax)
                 # Draw edges
