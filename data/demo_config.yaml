@@ -6,7 +6,7 @@ base:
   env_var: 2
   activ_f: "leaky_relu"
   model_type: "dqn"
-  instant_evaluation: false
+  instant_evaluation: true
   
 netmon:
   dim: 128
