@@ -31,6 +31,9 @@ Further description of these methods can be found within description file.
 ## Multi-GPU support
 We have provided code for multi-GPU support for the NetMon class created by the authors. We have used simple DataParallel python structure for a split across mulitple GPUs within a single compute node. Additionally, we have modified the code to support distribution of the Q-value predictor and the NetMon class between 2 GPUs, therefore allowing for slightly bigger models. 
 
+## Results
+We were able to train multiple models that effectively control ten planes on a relatively sparse graph. The models have relatively stable performance with numerous planes reaching the target on their own. We also implemented an action mask, that prevents taking unwanted actions like flying back or returning to the already visited point, yet the agents have a valid choice in the overwhleming majority of instances. Our agents are not proned to exploit the reward system, despite it being quite a dense one. We performed a sweep of the hyperparameter space, which significantly enhanced the model performance. On this GitHub repo, we provide a comprehensive overview of our work, code and results in the demo file.
+
 ### References
   - Graph MARL original implementation GitHub repo: https://github.com/jw3il/graph-marl/tree/main?tab=readme-ov-file, Weil, J., Bao, Z., Abboud, O., & Meuser, T. (2024). Towards Generalizability of Multi-Agent Reinforcement  Learning in Graphs with Recurrent Message Passing [Conference paper]. Proceedings of the 23rd International Conference on  Autonomous Agents and Multiagent Systems
   - Source for the Replay Buffer for experience based prioritization: https://github.com/labmlai/annotated_deep_learning_paper_implementations/blob/master/labml_nn/rl/dqn/replay_buffer.py
