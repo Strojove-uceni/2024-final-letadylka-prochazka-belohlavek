@@ -602,7 +602,7 @@ finally:
                 paths_to_save = env.save_paths()
                 print(json.dumps(metrics, indent = 4, sort_keys=True, default=str))
 
-                env.animation() # Plot the animation
+                env.plot_trajectory() # Plot the animation
 
         except Exception as e:
             traceback.print_exc()
