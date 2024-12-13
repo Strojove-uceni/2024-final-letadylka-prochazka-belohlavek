@@ -16,7 +16,7 @@ Our contributions mainly consist of the following:
 - addition of prioritized sampling from the replay buffer
 - addition of regularization as we deal with higher dimensional data, consequently using more layers within our models
 - augmented the structure to support dynamic environment
-- state-less version of the NetMon class -> the training can be split across multiple gpus
+- state-less version of the NetMon class $\rightarrow$ the training can be split across multiple gpus
 
 ## Available Models to Try Out
 ### Q-value Prediction
