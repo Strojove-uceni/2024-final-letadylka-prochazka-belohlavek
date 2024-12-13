@@ -50,8 +50,8 @@ epsilon_greedy:
   epsilon_update_freq: 40
 
 training:
-  total_steps: 1500
-  step_before_train: 300
+  total_steps: 1000
+  step_before_train: 200
   step_between_train: 5
   args: null
   learning_rate: 0.001
