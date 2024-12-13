@@ -6,24 +6,24 @@
 ## About
 This project concerns itself with the application of Multi-Agent Reinforcement Learning for automatic routing of planes. We build on the implementation of authors (view References) and adapted and modified their code to suit our needs. The architecture of this beast comprises of Graph Convolutional Networks, Recurrent Neural Networks and other beautiful machine learning structures. These components are combined to create outputs that almost look like magic, all while employing an extremely thought-out process. 
 
-## How to run the project
-Description on how to run the project can be found in the demo notebook, along with a quick demonstration.
+## How to Run the Project
+Quick demonstration is included in demo.ipynb.
 
-## Our contributions
-Our contributions mainly consist of the following
-    - adaptation to air traffic control for efficient routing
-    - state-less version of the NetMon class -> the training can be split across multiple gpus
-    - generalization to variable neighbourhoods
-    - addition of prioritized replay buffer
+## Our Contributions
+Our contributions mainly consist of the following:
+    - adaptation of multia agent reinforcement learning to air traffic control for efficient routing
+    - generalization to variable number of edges
+    - addition of prioritized sampling from the replay buffer
     - addition of regularization as we deal with higher dimensional data, consequently using more layers within our models
     - augmented the structure to support dynamic environment
+    - state-less version of the NetMon class -> the training can be split across multiple gpus
 
-## Available models to try out
-### Q-value prediction
+## Available Models to Try Out
+### Q-value Prediction
   - DGN = Graph Convolutional Reinforcement Learning
   - DQN = Deep Q-Networks
   - Comm_net = Communication Network
-### State aggregation
+### State Aggregation
   - GCN = Graph Convolutional Network
   - SUM = simple sum
 Further description of these methods can be found within description file.
