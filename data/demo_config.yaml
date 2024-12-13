@@ -50,14 +50,14 @@ epsilon_greedy:
   epsilon_update_freq: 50
 
 training:
-  total_steps: 2500
-  step_before_train: 500
+  total_steps: 1500
+  step_before_train: 300
   step_between_train: 5
   args: null
   learning_rate: 0.001
   att_regularization_coeff: 0.03
   aux_loss_coeff: 0.01
-  sequence_length: 4
+  sequence_length: 2
   gamma: 0.9
   mini_batch_size: 8
   debug_plots: false
@@ -65,7 +65,7 @@ training:
 
 buffer:
   seed: 0
-  capacity: 1000
+  capacity: 500
   replay_half_precision: true
 
 log_buffer:
